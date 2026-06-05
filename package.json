@@ -1,0 +1,23 @@
+{
+  "name": "natroc-os",
+  "private": true,
+  "version": "1.0.0",
+  "description": "",
+  "keywords": [],
+  "author": "PT Kelana Tech Solutions",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@11.5.2",
+  "scripts": {
+    "dev:web": "pnpm --filter natrocos-web dev",
+    "build:web": "pnpm --filter natrocos-web build",
+    "lint:web": "pnpm --filter natrocos-web lint",
+    "preview:web": "pnpm --filter natrocos-web preview",
+    "clean": "rimraf apps/web/dist",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.8.3",
+    "rimraf": "^6.1.3"
+  }
+}
