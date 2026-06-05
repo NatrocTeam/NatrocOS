@@ -17,5 +17,3 @@ dist-ssr/
 .idea/
 .vscode/*
 !.vscode/extensions.json
-
-docs/
