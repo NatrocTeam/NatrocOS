@@ -1,0 +1,88 @@
+# NatrocOS
+
+NatrocOS is a local-first home server control plane. The current repository is a
+pnpm monorepo with a frontend-first implementation and browser-based mock state.
+The target platform is Debian and Ubuntu, but this snapshot does not yet include
+real system services, Docker integration, storage mutation, or authentication
+backends.
+
+## Repository
+
+- Package manager: pnpm 11.5.2
+- Workspace globs: `apps/*`, `packages/*`, `services/*`
+- Active application: `apps/web`
+- License: Apache-2.0
+- Author: Natroc Team
+
+## Primary Commands
+
+- `pnpm dev:web` - start the Vite dev server for the web app.
+- `pnpm build:web` - typecheck and build the web app.
+- `pnpm lint:web` - run ESLint for the web app.
+- `pnpm preview:web` - preview the built web app.
+- `pnpm format:check` - check repository formatting with Prettier.
+
+## Web App
+
+The web app is in `apps/web` and uses React, TypeScript, Vite, Tailwind CSS,
+Motion for React, and lucide-react icons. It currently implements a high-end
+dashboard-style product UI with these views:
+
+- Mock login
+- Dashboard
+- Apps
+- App Store
+- Settings
+
+The app does not require a backend to run. Login, app actions, language, and
+theme are handled in browser state or localStorage.
+
+## Important Paths
+
+- [`package.json`](package.json) - root workspace scripts and dev tools.
+- [`pnpm-workspace.yaml`](pnpm-workspace.yaml) - workspace package globs.
+- [`apps/web/package.json`](apps/web/package.json) - web app dependencies and scripts.
+- [`apps/web/src/App.tsx`](apps/web/src/App.tsx) - root client state and view routing.
+- [`apps/web/src/components/natrocos-ui.tsx`](apps/web/src/components/natrocos-ui.tsx) - main UI components.
+- [`apps/web/src/data/mock.ts`](apps/web/src/data/mock.ts) - typed mock data and icons.
+- [`apps/web/src/types/natrocos.ts`](apps/web/src/types/natrocos.ts) - shared frontend types.
+- [`apps/web/src/i18n/dictionary.ts`](apps/web/src/i18n/dictionary.ts) - locale loader.
+- [`apps/web/src/i18n/locales/id_ID.json`](apps/web/src/i18n/locales/id_ID.json) - Indonesian UI copy.
+- [`apps/web/src/i18n/locales/en_US.json`](apps/web/src/i18n/locales/en_US.json) - English UI copy.
+- [`apps/web/src/index.css`](apps/web/src/index.css) - Tailwind import and global styling.
+- [`apps/web/vite.config.ts`](apps/web/vite.config.ts) - Vite configuration.
+- [`apps/web/tsconfig.app.json`](apps/web/tsconfig.app.json) - browser TypeScript configuration.
+
+## i18n Rules
+
+User-facing copy should live in JSON locale files, not directly in React
+components. Locale namespaces are organized by product area:
+
+- `common`
+- `navigation`
+- `login`
+- `dashboard`
+- `apps`
+- `store`
+- `settings`
+
+Page-specific errors belong under the relevant page namespace, for example
+`login.errors.invalidCredentials` or `store.errors.searchFailed`. When adding a
+new key, update both `id_ID.json` and `en_US.json`.
+
+## Frontend Guidelines
+
+- Keep the first screen as the usable app experience, not a marketing page.
+- Prefer existing dependencies and patterns before adding new packages.
+- Use lucide-react for icons because it is already installed.
+- Keep mock fixtures typed and stable so future API responses can match them.
+- Do not introduce real backend, Docker, systemd, storage, or auth behavior
+  unless that work is explicitly requested.
+- Treat values such as Docker image names, ports, app names, and node names as
+  domain data unless they are clearly user-facing UI copy.
+
+## Current Status
+
+The current web app is a functional mock frontend. It can be developed from the
+root workspace with `pnpm dev:web` and validated with `pnpm build:web` and
+`pnpm lint:web`.

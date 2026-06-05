@@ -1,0 +1,157 @@
+{
+  "common": {
+    "product": "NatrocOS",
+    "eyebrow": "Home server control plane",
+    "platformSupport": "Debian and Ubuntu",
+    "language": "Language",
+    "theme": "Theme",
+    "owner": "Owner",
+    "logout": "Log out",
+    "install": "Install",
+    "open": "Open",
+    "restart": "Restart",
+    "stop": "Stop",
+    "start": "Start",
+    "sync": "Sync",
+    "refreshing": "Refreshing",
+    "recommended": "Recommended",
+    "alerts": "Alerts",
+    "menu": "Menu",
+    "close": "Close",
+    "runningApps": "running apps",
+    "uptime": "uptime",
+    "backup": "Backup",
+    "node": "Node",
+    "notConfigured": "Not configured",
+    "light": "Light",
+    "dark": "Dark",
+    "indonesia": "Indonesia",
+    "english": "English",
+    "backendNotice": "Backend is not active yet. Every action updates mocked browser state."
+  },
+  "navigation": {
+    "dashboard": "Dashboard",
+    "apps": "Apps",
+    "store": "App Store",
+    "settings": "Settings"
+  },
+  "login": {
+    "loginTitle": "Enter the local control room",
+    "loginCopy": "Monitor server health, apps, storage, and admin sessions from one calm workspace.",
+    "username": "Username",
+    "usernameHelp": "Use the local owner account.",
+    "password": "Password",
+    "passwordHelp": "Mock login accepts at least six characters.",
+    "signIn": "Sign in",
+    "signingIn": "Verifying",
+    "localOwner": "Local owner",
+    "nodeAddress": "192.168.11.42",
+    "errors": {
+      "invalidCredentials": "Enter a username and a password with at least six characters."
+    }
+  },
+  "dashboard": {
+    "overview": "System overview",
+    "overviewCopy": "The data is mocked, but the layout follows the home server workflow planned for the Go backend.",
+    "allSystems": "All systems running",
+    "warning": "Needs attention",
+    "storagePool": "Storage pool",
+    "liveApps": "Live apps",
+    "liveAppsOnNode": "live apps on Helios node",
+    "eventStream": "Event stream",
+    "runtimeFocus": "Runtime focus",
+    "authMockReady": "Auth mock ready",
+    "authMockDetail": "local browser session",
+    "storageScanned": "Storage scanned",
+    "storageScannedDetail": "/DATA pool simulated",
+    "containerCheck": "Container check",
+    "containerCheckDetail": "4 templates registered",
+    "metrics": {
+      "cpu": {
+        "label": "CPU",
+        "detail": "12 priority processes"
+      },
+      "memory": {
+        "label": "Memory",
+        "detail": "of 15.4 GB available"
+      },
+      "storage": {
+        "label": "Storage",
+        "detail": "primary /DATA pool"
+      },
+      "network": {
+        "label": "Network",
+        "detail": "rx 52.1 / tx 32.5"
+      }
+    },
+    "errors": {
+      "refreshFailed": "Dashboard refresh failed."
+    }
+  },
+  "apps": {
+    "runtimeEyebrow": "Container runtime",
+    "updated": "Updated",
+    "memory": "Memory",
+    "ports": "Ports",
+    "status": {
+      "running": "running",
+      "stopped": "stopped",
+      "updating": "updating",
+      "error": "error"
+    },
+    "instances": {
+      "vaultwarden": {
+        "updatedAt": "5 minutes ago"
+      },
+      "immich": {
+        "updatedAt": "18 minutes ago"
+      },
+      "paperless": {
+        "updatedAt": "41 minutes ago"
+      },
+      "syncthing": {
+        "updatedAt": "2 hours ago"
+      }
+    },
+    "errors": {
+      "actionFailed": "The app action could not be completed."
+    }
+  },
+  "store": {
+    "catalogEyebrow": "Catalog",
+    "catalogCopy": "Curated compose templates for the future installer and app-management service.",
+    "search": "Search apps",
+    "emptyTitle": "No results",
+    "emptyCopy": "Change the search term or reset the filter.",
+    "apps": {
+      "jellyfin": {
+        "category": "Media",
+        "description": "Local media server for films, music, and family collections."
+      },
+      "actual": {
+        "category": "Finance",
+        "description": "Personal budgeting that runs fully on your own server."
+      },
+      "mealie": {
+        "category": "Kitchen",
+        "description": "Recipe catalog and shopping plans for the household."
+      },
+      "minio": {
+        "category": "Storage",
+        "description": "S3-compatible object storage for backups and local apps."
+      }
+    },
+    "errors": {
+      "searchFailed": "Catalog search failed."
+    }
+  },
+  "settings": {
+    "profileEyebrow": "Local profile",
+    "profileCopy": "Account, localization, and shell preferences for the frontend prototype.",
+    "security": "Security",
+    "argonPlanned": "Argon2id planned",
+    "errors": {
+      "saveFailed": "Preferences cannot be saved yet."
+    }
+  }
+}

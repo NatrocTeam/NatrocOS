@@ -1,0 +1,157 @@
+{
+  "common": {
+    "product": "NatrocOS",
+    "eyebrow": "Control plane server rumah",
+    "platformSupport": "Debian dan Ubuntu",
+    "language": "Bahasa",
+    "theme": "Tema",
+    "owner": "Owner",
+    "logout": "Keluar",
+    "install": "Pasang",
+    "open": "Buka",
+    "restart": "Restart",
+    "stop": "Stop",
+    "start": "Start",
+    "sync": "Sinkron",
+    "refreshing": "Membaca ulang",
+    "recommended": "Direkomendasikan",
+    "alerts": "Peringatan",
+    "menu": "Menu",
+    "close": "Tutup",
+    "runningApps": "aplikasi berjalan",
+    "uptime": "waktu aktif",
+    "backup": "Cadangan",
+    "node": "Node",
+    "notConfigured": "Belum dikonfigurasi",
+    "light": "Terang",
+    "dark": "Gelap",
+    "indonesia": "Indonesia",
+    "english": "English",
+    "backendNotice": "Backend belum aktif. Semua tombol menjalankan state mock di browser."
+  },
+  "navigation": {
+    "dashboard": "Dasbor",
+    "apps": "Aplikasi",
+    "store": "Katalog App",
+    "settings": "Pengaturan"
+  },
+  "login": {
+    "loginTitle": "Masuk ke ruang kendali lokal",
+    "loginCopy": "Pantau server, aplikasi, storage, dan sesi admin dari satu permukaan kerja yang tenang.",
+    "username": "Username",
+    "usernameHelp": "Gunakan akun owner lokal.",
+    "password": "Password",
+    "passwordHelp": "Mock login menerima minimal enam karakter.",
+    "signIn": "Masuk",
+    "signingIn": "Memverifikasi",
+    "localOwner": "Owner lokal",
+    "nodeAddress": "192.168.11.42",
+    "errors": {
+      "invalidCredentials": "Isi username dan password minimal enam karakter."
+    }
+  },
+  "dashboard": {
+    "overview": "Ringkasan sistem",
+    "overviewCopy": "Data masih mock, tetapi layout mengikuti pola kerja server rumah yang akan dipakai backend Go.",
+    "allSystems": "Semua sistem berjalan",
+    "warning": "Butuh perhatian",
+    "storagePool": "Storage pool",
+    "liveApps": "Aplikasi aktif",
+    "liveAppsOnNode": "aplikasi aktif di node Helios",
+    "eventStream": "Alur event",
+    "runtimeFocus": "Fokus runtime",
+    "authMockReady": "Auth mock siap",
+    "authMockDetail": "session browser lokal",
+    "storageScanned": "Storage dibaca",
+    "storageScannedDetail": "/DATA pool disimulasikan",
+    "containerCheck": "Container check",
+    "containerCheckDetail": "4 template terdaftar",
+    "metrics": {
+      "cpu": {
+        "label": "CPU",
+        "detail": "12 proses prioritas"
+      },
+      "memory": {
+        "label": "Memori",
+        "detail": "dari 15.4 GB tersedia"
+      },
+      "storage": {
+        "label": "Penyimpanan",
+        "detail": "pool utama /DATA"
+      },
+      "network": {
+        "label": "Jaringan",
+        "detail": "rx 52.1 / tx 32.5"
+      }
+    },
+    "errors": {
+      "refreshFailed": "Gagal membaca ulang data dasbor."
+    }
+  },
+  "apps": {
+    "runtimeEyebrow": "Runtime container",
+    "updated": "Diperbarui",
+    "memory": "Memori",
+    "ports": "Port",
+    "status": {
+      "running": "berjalan",
+      "stopped": "berhenti",
+      "updating": "update",
+      "error": "error"
+    },
+    "instances": {
+      "vaultwarden": {
+        "updatedAt": "5 menit lalu"
+      },
+      "immich": {
+        "updatedAt": "18 menit lalu"
+      },
+      "paperless": {
+        "updatedAt": "41 menit lalu"
+      },
+      "syncthing": {
+        "updatedAt": "2 jam lalu"
+      }
+    },
+    "errors": {
+      "actionFailed": "Aksi aplikasi gagal dijalankan."
+    }
+  },
+  "store": {
+    "catalogEyebrow": "Katalog",
+    "catalogCopy": "Template compose terkurasi untuk layanan installer dan manajemen aplikasi nanti.",
+    "search": "Cari aplikasi",
+    "emptyTitle": "Tidak ada hasil",
+    "emptyCopy": "Ubah kata kunci pencarian atau reset filter.",
+    "apps": {
+      "jellyfin": {
+        "category": "Media",
+        "description": "Server media lokal untuk film, musik, dan koleksi keluarga."
+      },
+      "actual": {
+        "category": "Keuangan",
+        "description": "Pembukuan pribadi yang berjalan penuh di server sendiri."
+      },
+      "mealie": {
+        "category": "Dapur",
+        "description": "Katalog resep dan rencana belanja untuk rumah."
+      },
+      "minio": {
+        "category": "Penyimpanan",
+        "description": "Object storage S3-compatible untuk backup dan aplikasi lokal."
+      }
+    },
+    "errors": {
+      "searchFailed": "Pencarian katalog gagal dijalankan."
+    }
+  },
+  "settings": {
+    "profileEyebrow": "Profil lokal",
+    "profileCopy": "Akun, lokalisasi, dan preferensi shell untuk prototipe frontend.",
+    "security": "Keamanan",
+    "argonPlanned": "Argon2id direncanakan",
+    "errors": {
+      "saveFailed": "Preferensi belum bisa disimpan."
+    }
+  }
+}
