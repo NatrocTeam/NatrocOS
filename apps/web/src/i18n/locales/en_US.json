@@ -27,7 +27,11 @@
     "dark": "Dark",
     "indonesia": "Indonesia",
     "english": "English",
-    "backendNotice": "Backend is not active yet. Every action updates mocked browser state."
+    "working": "Working",
+    "dismiss": "Dismiss notification",
+    "tryAgain": "Try again or check the NatrocOS gateway.",
+    "noAlerts": "No active alerts from the gateway.",
+    "backendNotice": "Connected to the local NatrocOS gateway through the live API."
   },
   "navigation": {
     "dashboard": "Dashboard",
@@ -41,31 +45,39 @@
     "username": "Username",
     "usernameHelp": "Use the local owner account.",
     "password": "Password",
-    "passwordHelp": "Mock login accepts at least six characters.",
+    "passwordHelp": "At least eight characters. First login creates the local owner.",
     "signIn": "Sign in",
     "signingIn": "Verifying",
     "localOwner": "Local owner",
-    "nodeAddress": "192.168.11.42",
+    "nodeAddress": "Local Web UI port 80",
+    "highlights": {
+      "dataRoot": "Data root",
+      "webPort": "Web UI port",
+      "runtime": "App runtime",
+      "passwordHash": "Password hash"
+    },
     "errors": {
-      "invalidCredentials": "Enter a username and a password with at least six characters."
+      "invalidCredentials": "Enter a username and a password with at least eight characters.",
+      "authFailed": "Sign-in failed. Check the owner account or the NatrocOS gateway."
     }
   },
   "dashboard": {
     "overview": "System overview",
-    "overviewCopy": "The data is mocked, but the layout follows the home server workflow planned for the Go backend.",
+    "overviewCopy": "Data is read directly from the local gateway, Docker runtime, and /NatrocOS storage root.",
     "allSystems": "All systems running",
     "warning": "Needs attention",
     "storagePool": "Storage pool",
+    "storageUsed": "Used",
     "liveApps": "Live apps",
-    "liveAppsOnNode": "live apps on Helios node",
+    "liveAppsOnNode": "live apps",
     "eventStream": "Event stream",
     "runtimeFocus": "Runtime focus",
-    "authMockReady": "Auth mock ready",
-    "authMockDetail": "local browser session",
+    "authReady": "Auth backend active",
+    "authDetail": "gateway-issued session token",
     "storageScanned": "Storage scanned",
-    "storageScannedDetail": "/DATA pool simulated",
+    "storageScannedDetail": "/NatrocOS pool read from the system",
     "containerCheck": "Container check",
-    "containerCheckDetail": "4 templates registered",
+    "containerCheckDetail": "{count} containers found",
     "metrics": {
       "cpu": {
         "label": "CPU",
@@ -77,11 +89,57 @@
       },
       "storage": {
         "label": "Storage",
-        "detail": "primary /DATA pool"
+        "detail": "primary /NatrocOS pool"
       },
       "network": {
         "label": "Network",
         "detail": "rx 52.1 / tx 32.5"
+      }
+    },
+    "quickActions": {
+      "eyebrow": "Quick actions",
+      "title": "Operational controls",
+      "items": {
+        "scanStorage": {
+          "title": "Scan storage",
+          "detail": "Refresh mounts, pools, and /NatrocOS capacity."
+        },
+        "checkBackups": {
+          "title": "Check backups",
+          "detail": "Validate the last local backup schedule."
+        },
+        "exportDiagnostics": {
+          "title": "Export diagnostics",
+          "detail": "Prepare a snapshot of service logs and metadata."
+        },
+        "openStore": {
+          "title": "Open catalog",
+          "detail": "Jump to application templates ready for the install queue."
+        }
+      },
+      "toasts": {
+        "scanStorage": {
+          "title": "Storage scanned",
+          "detail": "The /NatrocOS pool was refreshed from the gateway."
+        },
+        "checkBackups": {
+          "title": "Backup needs setup",
+          "detail": "No active backup configuration exists."
+        },
+        "exportDiagnostics": {
+          "title": "Diagnostics ready",
+          "detail": "The diagnostics request was recorded for the backend service."
+        },
+        "openStore": {
+          "title": "Catalog opened",
+          "detail": "Choose an app template for the next install queue item."
+        }
+      }
+    },
+    "toasts": {
+      "refreshed": {
+        "title": "Telemetry refreshed",
+        "detail": "System, storage, and container data was refreshed from the gateway."
       }
     },
     "errors": {
@@ -90,6 +148,7 @@
   },
   "apps": {
     "runtimeEyebrow": "Container runtime",
+    "empty": "No containers are registered by the backend yet.",
     "updated": "Updated",
     "memory": "Memory",
     "ports": "Ports",
@@ -99,18 +158,22 @@
       "updating": "updating",
       "error": "error"
     },
-    "instances": {
-      "vaultwarden": {
-        "updatedAt": "5 minutes ago"
+    "toasts": {
+      "open": {
+        "title": "{app} opened",
+        "detail": "The open action was sent to the gateway."
       },
-      "immich": {
-        "updatedAt": "18 minutes ago"
+      "restart": {
+        "title": "{app} restarted",
+        "detail": "The restart command was sent to Docker through the gateway."
       },
-      "paperless": {
-        "updatedAt": "41 minutes ago"
+      "start": {
+        "title": "{app} started",
+        "detail": "The start command was sent to Docker through the gateway."
       },
-      "syncthing": {
-        "updatedAt": "2 hours ago"
+      "stop": {
+        "title": "{app} stopped",
+        "detail": "The stop command was sent to Docker through the gateway."
       }
     },
     "errors": {
@@ -119,37 +182,27 @@
   },
   "store": {
     "catalogEyebrow": "Catalog",
-    "catalogCopy": "Curated compose templates for the future installer and app-management service.",
+    "catalogCopy": "Catalog entries are read from JSON files in /NatrocOS/store and served by the gateway.",
     "search": "Search apps",
+    "installing": "Queueing",
     "emptyTitle": "No results",
     "emptyCopy": "Change the search term or reset the filter.",
-    "apps": {
-      "jellyfin": {
-        "category": "Media",
-        "description": "Local media server for films, music, and family collections."
-      },
-      "actual": {
-        "category": "Finance",
-        "description": "Personal budgeting that runs fully on your own server."
-      },
-      "mealie": {
-        "category": "Kitchen",
-        "description": "Recipe catalog and shopping plans for the household."
-      },
-      "minio": {
-        "category": "Storage",
-        "description": "S3-compatible object storage for backups and local apps."
-      }
-    },
     "errors": {
-      "searchFailed": "Catalog search failed."
+      "searchFailed": "Catalog search failed.",
+      "installFailed": "The app could not be added to the install queue."
+    },
+    "toasts": {
+      "queued": {
+        "title": "{app} queued",
+        "detail": "The install request was sent to the gateway."
+      }
     }
   },
   "settings": {
     "profileEyebrow": "Local profile",
-    "profileCopy": "Account, localization, and shell preferences for the frontend prototype.",
+    "profileCopy": "Owner account, localization, and shell preferences from the backend session.",
     "security": "Security",
-    "argonPlanned": "Argon2id planned",
+    "passwordHash": "PBKDF2-SHA256",
     "errors": {
       "saveFailed": "Preferences cannot be saved yet."
     }

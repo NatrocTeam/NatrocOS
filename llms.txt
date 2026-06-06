@@ -1,16 +1,25 @@
 # NatrocOS
 
-NatrocOS is a local-first home server control plane. The current repository is a
-pnpm monorepo with a frontend-first implementation and browser-based mock state.
-The target platform is Debian and Ubuntu, but this snapshot does not yet include
-real system services, Docker integration, storage mutation, or authentication
-backends.
+NatrocOS is a local-first home server control plane for Debian and Ubuntu. The
+repository combines a pnpm React frontend, shared TypeScript contracts, a Go
+Web UI/front door, a Go gateway, a Go CLI, and early Go service boundaries. The
+current direction is live backend data by default: no frontend app/store
+fixtures, no browser-only login, public Web UI on port 80, and internal API
+services bound to localhost by default.
 
 ## Repository
 
 - Package manager: pnpm 11.5.2
 - Workspace globs: `apps/*`, `packages/*`, `services/*`
-- Active application: `apps/web`
+- Active web app: `apps/web`
+- Active Go Web UI/front door: `apps/webui`
+- Active Go CLI: `apps/cli`
+- Active Go gateway: `apps/gateway`
+- Health-only Go service boundaries: `apps/app-management`, `services/user`, `services/storage`
+- Active shared package: `packages/shared`
+- Default data root: `/NatrocOS`
+- Default Web UI URL: `http://127.0.0.1`
+- Default gateway API URL: `http://127.0.0.1:8080`
 - License: Apache-2.0
 - Author: Natroc Team
 
@@ -19,39 +28,80 @@ backends.
 - `pnpm dev:web` - start the Vite dev server for the web app.
 - `pnpm build:web` - typecheck and build the web app.
 - `pnpm lint:web` - run ESLint for the web app.
+- `pnpm typecheck:shared` - typecheck shared TypeScript contracts.
+- `pnpm build:go` - build all Go packages and commands.
+- `pnpm test:go` - run Go tests.
+- `pnpm check` - run format, shared typecheck, web lint/build, and Go tests.
 - `pnpm preview:web` - preview the built web app.
 - `pnpm format:check` - check repository formatting with Prettier.
 
 ## Web App
 
 The web app is in `apps/web` and uses React, TypeScript, Vite, Tailwind CSS,
-Motion for React, and lucide-react icons. It currently implements a high-end
-dashboard-style product UI with these views:
+Motion for React, and lucide-react icons. It implements these views:
 
-- Mock login
-- Dashboard
-- Apps
-- App Store
-- Settings
+- Login and first-owner setup through the gateway API.
+- Dashboard backed by `GET /api/system/summary`.
+- Apps backed by Docker data from the gateway.
+- App Store backed by JSON catalog files from `/NatrocOS/store`.
+- Settings backed by the active backend session and system summary.
 
-The app does not require a backend to run. Login, app actions, language, and
-theme are handled in browser state or localStorage.
+Vite proxies `/api` and `/health` to `http://127.0.0.1:8080` unless
+`VITE_NATROCOS_API_URL` is set.
 
 ## Important Paths
 
 - [`package.json`](package.json) - root workspace scripts and dev tools.
 - [`pnpm-workspace.yaml`](pnpm-workspace.yaml) - workspace package globs.
 - [`apps/web/package.json`](apps/web/package.json) - web app dependencies and scripts.
-- [`apps/web/src/App.tsx`](apps/web/src/App.tsx) - root client state and view routing.
-- [`apps/web/src/components/natrocos-ui.tsx`](apps/web/src/components/natrocos-ui.tsx) - main UI components.
-- [`apps/web/src/data/mock.ts`](apps/web/src/data/mock.ts) - typed mock data and icons.
+- [`apps/web/src/App.tsx`](apps/web/src/App.tsx) - root client state, session handling, and view routing.
+- [`apps/web/src/services/control-plane.ts`](apps/web/src/services/control-plane.ts) - frontend control-plane client interface.
+- [`apps/web/src/services/http-control-plane.ts`](apps/web/src/services/http-control-plane.ts) - typed HTTP control-plane adapter.
+- [`apps/web/src/data/ui.ts`](apps/web/src/data/ui.ts) - visual metadata only, not runtime data.
 - [`apps/web/src/types/natrocos.ts`](apps/web/src/types/natrocos.ts) - shared frontend types.
+- [`apps/web/src/components/views/login-screen.tsx`](apps/web/src/components/views/login-screen.tsx) - login and first-owner UI.
+- [`apps/web/src/components/views/dashboard-view.tsx`](apps/web/src/components/views/dashboard-view.tsx) - dashboard screen.
+- [`apps/web/src/components/views/apps-view.tsx`](apps/web/src/components/views/apps-view.tsx) - apps screen.
+- [`apps/web/src/components/views/store-view.tsx`](apps/web/src/components/views/store-view.tsx) - app store screen.
+- [`apps/web/src/components/views/settings-view.tsx`](apps/web/src/components/views/settings-view.tsx) - settings screen.
 - [`apps/web/src/i18n/dictionary.ts`](apps/web/src/i18n/dictionary.ts) - locale loader.
 - [`apps/web/src/i18n/locales/id_ID.json`](apps/web/src/i18n/locales/id_ID.json) - Indonesian UI copy.
 - [`apps/web/src/i18n/locales/en_US.json`](apps/web/src/i18n/locales/en_US.json) - English UI copy.
-- [`apps/web/src/index.css`](apps/web/src/index.css) - Tailwind import and global styling.
-- [`apps/web/vite.config.ts`](apps/web/vite.config.ts) - Vite configuration.
-- [`apps/web/tsconfig.app.json`](apps/web/tsconfig.app.json) - browser TypeScript configuration.
+- [`packages/shared/src/index.ts`](packages/shared/src/index.ts) - serializable domain and API contracts shared by frontend.
+- [`go.mod`](go.mod) - Go module for backend services.
+- [`apps/webui/cmd/webui/main.go`](apps/webui/cmd/webui/main.go) - Web UI/front door entrypoint, default `:80`.
+- [`apps/webui/internal/server/server.go`](apps/webui/internal/server/server.go) - static SPA handler and reverse proxy to the internal API.
+- [`apps/gateway/cmd/gateway/main.go`](apps/gateway/cmd/gateway/main.go) - internal gateway entrypoint, default `127.0.0.1:8080`.
+- [`apps/gateway/internal/server/server.go`](apps/gateway/internal/server/server.go) - gateway routes and error mapping.
+- [`apps/gateway/internal/server/live_provider.go`](apps/gateway/internal/server/live_provider.go) - live provider for Docker, `/proc`, `df`, store catalog, and file-backed auth.
+- [`apps/cli/cmd/natrocos/main.go`](apps/cli/cmd/natrocos/main.go) - NatrocOS CLI entrypoint.
+- [`internal/cli/cli.go`](internal/cli/cli.go) - CLI parser, API client, and command handlers.
+- [`internal/natrocos/contracts.go`](internal/natrocos/contracts.go) - Go data root, route constants, and DTOs.
+- [`internal/servicekit/health.go`](internal/servicekit/health.go) - shared health endpoint for service boundaries.
+
+## Runtime
+
+### Web UI Front Door
+
+- Default bind address: `:80`; override with `NATROCOS_WEBUI_ADDR`.
+- Default internal API target: `http://127.0.0.1:8080`; override with `NATROCOS_API_INTERNAL_URL`.
+- Default static directory: `/usr/share/natrocos/www`, falling back to `apps/web/dist` for development; override with `NATROCOS_WEBUI_STATIC_DIR`.
+- Proxies `/api/*` and `/health` to the internal gateway API.
+
+### Gateway API
+
+- Default bind address: `127.0.0.1:8080`; override with `NATROCOS_GATEWAY_ADDR`.
+- Default data root: `/NatrocOS`; override with `NATROCOS_DATA_ROOT`.
+- Default store catalog: `/NatrocOS/store`; override with `NATROCOS_STORE_DIR`.
+- Auth metadata path: `/NatrocOS/metadata/user.db`.
+- Auth baseline: one owner, random access token, 24-hour session expiry,
+  PBKDF2-SHA256 password hash with random salt.
+- Docker apps are read from `docker ps -a`; start/stop/restart call the Docker
+  CLI through the gateway.
+- Store install intentionally returns `501 Not Implemented` until the
+  app-management compose installer exists.
+- Storage mutation, disk format/mount, Samba, MergerFS, USB automount, and
+  systemd installer behavior are not implemented yet.
 
 ## i18n Rules
 
@@ -66,23 +116,26 @@ components. Locale namespaces are organized by product area:
 - `store`
 - `settings`
 
-Page-specific errors belong under the relevant page namespace, for example
-`login.errors.invalidCredentials` or `store.errors.searchFailed`. When adding a
+Page-specific errors belong under the relevant page namespace. When adding a
 new key, update both `id_ID.json` and `en_US.json`.
 
-## Frontend Guidelines
+## Development Guidelines
 
 - Keep the first screen as the usable app experience, not a marketing page.
 - Prefer existing dependencies and patterns before adding new packages.
 - Use lucide-react for icons because it is already installed.
-- Keep mock fixtures typed and stable so future API responses can match them.
-- Do not introduce real backend, Docker, systemd, storage, or auth behavior
-  unless that work is explicitly requested.
-- Treat values such as Docker image names, ports, app names, and node names as
-  domain data unless they are clearly user-facing UI copy.
+- Put cross-app DTOs, API route names, IDs, and serializable domain contracts in `@natrocos/shared`.
+- Do not add frontend runtime fixtures for apps, store catalog, users, metrics,
+  node names, ports, or Docker images.
+- Treat `/NatrocOS` as the product data root unless a test/dev override is used.
+- Keep destructive behavior explicit: no disk format, permanent mount, Samba,
+  MergerFS, USB automount, update, or uninstall mutation without dry-run and
+  confirmation behavior.
 
 ## Current Status
 
-The current web app is a functional mock frontend. It can be developed from the
-root workspace with `pnpm dev:web` and validated with `pnpm build:web` and
-`pnpm lint:web`.
+The frontend builds against the live HTTP control-plane client. The gateway
+serves real system summary data where the host provides Linux/Docker runtime
+interfaces, and it degrades to empty/unavailable values instead of frontend
+fixtures. Validate the current baseline with `pnpm build:web` and
+`pnpm test:go`; run the full repository gate with `pnpm check`.

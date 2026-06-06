@@ -11,4 +11,16 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  server: {
+    proxy: {
+      "/api": {
+        target: process.env.VITE_NATROCOS_API_URL || "http://127.0.0.1:8080",
+        changeOrigin: true,
+      },
+      "/health": {
+        target: process.env.VITE_NATROCOS_API_URL || "http://127.0.0.1:8080",
+        changeOrigin: true,
+      },
+    },
+  },
 });

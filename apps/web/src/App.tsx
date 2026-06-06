@@ -1,21 +1,64 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
-import {
-  AppBackdrop,
-  AppsView,
-  DashboardView,
-  FloatingNav,
-  LoginScreen,
-  SettingsView,
-  SideRail,
-  StoreView,
-} from "@/components/natrocos-ui";
-import { initialApps, storeApps } from "@/data/mock";
+import { AppBackdrop } from "@/components/natrocos-primitives";
+import { FloatingNav, SideRail } from "@/components/shell/navigation";
+import { ToastStack } from "@/components/toast-stack";
+import { AppsView } from "@/components/views/apps-view";
+import { DashboardView } from "@/components/views/dashboard-view";
+import { LoginScreen } from "@/components/views/login-screen";
+import { SettingsView } from "@/components/views/settings-view";
+import { StoreView } from "@/components/views/store-view";
+import { quickActions } from "@/data/ui";
 import { dictionary } from "@/i18n/dictionary";
-import type { AppStatus, Language, Theme, View } from "@/types/natrocos";
+import { createHttpControlPlaneClient } from "@/services/http-control-plane";
+import type {
+  AppAction,
+  AppInstance,
+  AppInstanceId,
+  DashboardAction,
+  Language,
+  LoginRequestDto,
+  PendingAppAction,
+  StoragePoolDto,
+  StoreApp,
+  StoreAppId,
+  SystemMetricDto,
+  Theme,
+  ToastMessage,
+  ToastTone,
+  UserSessionDto,
+  View,
+} from "@/types/natrocos";
 
 const spring = { type: "spring" as const, stiffness: 110, damping: 22 };
+const apiBaseURL = import.meta.env.VITE_NATROCOS_API_URL ?? "";
+const sessionStorageKey = "natrocos-session";
+
+function readStoredSession() {
+  const storedValue = localStorage.getItem(sessionStorageKey);
+  if (!storedValue || storedValue === "owner") return null;
+
+  try {
+    const parsedSession = JSON.parse(storedValue) as UserSessionDto;
+    const expiresAt = new Date(parsedSession.expiresAt).getTime();
+    if (!parsedSession.accessToken || Number.isNaN(expiresAt)) {
+      return null;
+    }
+    if (expiresAt <= Date.now()) {
+      localStorage.removeItem(sessionStorageKey);
+      return null;
+    }
+    return parsedSession;
+  } catch {
+    localStorage.removeItem(sessionStorageKey);
+    return null;
+  }
+}
+
+function storeSession(session: UserSessionDto) {
+  localStorage.setItem(sessionStorageKey, JSON.stringify(session));
+}
 
 function App() {
   const [language, setLanguage] = useState<Language>(() => {
@@ -24,11 +67,32 @@ function App() {
   const [theme, setTheme] = useState<Theme>(() => {
     return (localStorage.getItem("natrocos-theme") as Theme) || "light";
   });
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [session, setSession] = useState<UserSessionDto | null>(() =>
+    readStoredSession(),
+  );
   const [view, setView] = useState<View>("dashboard");
-  const [apps, setApps] = useState(initialApps);
+  const [apps, setApps] = useState<AppInstance[]>([]);
+  const [storeCatalog, setStoreCatalog] = useState<StoreApp[]>([]);
+  const [metrics, setMetrics] = useState<SystemMetricDto[]>([]);
+  const [storagePools, setStoragePools] = useState<StoragePoolDto[]>([]);
+  const [nodeName, setNodeName] = useState("");
+  const [uptime, setUptime] = useState("");
   const [query, setQuery] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [pendingAppAction, setPendingAppAction] =
+    useState<PendingAppAction | null>(null);
+  const [installingStoreAppId, setInstallingStoreAppId] =
+    useState<StoreAppId | null>(null);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const isAuthenticated = Boolean(session);
+  const controlPlaneClient = useMemo(
+    () =>
+      createHttpControlPlaneClient(
+        apiBaseURL,
+        () => session?.accessToken ?? null,
+      ),
+    [session?.accessToken],
+  );
 
   useEffect(() => {
     localStorage.setItem("natrocos-language", language);
@@ -39,49 +103,230 @@ function App() {
     document.documentElement.classList.toggle("dark", theme === "dark");
   }, [theme]);
 
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let isActive = true;
+    void (async () => {
+      try {
+        const [summary, catalog] = await Promise.all([
+          controlPlaneClient.getSystemSummary(),
+          controlPlaneClient.listStoreApps(),
+        ]);
+
+        if (!isActive) return;
+        setApps(summary.apps);
+        setMetrics(summary.metrics);
+        setNodeName(summary.nodeName);
+        setStoragePools(summary.storagePools);
+        setStoreCatalog(catalog);
+        setUptime(summary.uptime);
+      } finally {
+        if (isActive) {
+          setIsRefreshing(false);
+        }
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [controlPlaneClient, isAuthenticated]);
+
   const runningCount = apps.filter((app) => app.status === "running").length;
 
   const filteredStoreApps = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return storeApps;
+    if (!normalizedQuery) return storeCatalog;
 
-    return storeApps.filter((app) => {
-      const appCopy = dictionary[language].store.apps[app.id];
-      const haystack = [
-        app.name,
-        appCopy.category,
-        appCopy.description,
-        ...app.tags,
-      ]
+    return storeCatalog.filter((app) => {
+      const haystack = [app.name, app.category, app.description, ...app.tags]
         .join(" ")
         .toLowerCase();
 
       return haystack.includes(normalizedQuery);
     });
-  }, [language, query]);
+  }, [query, storeCatalog]);
 
-  function refreshMockData() {
-    setIsRefreshing(true);
-    window.setTimeout(() => {
-      setApps((currentApps) =>
-        currentApps.map((app, index) => ({
-          ...app,
-          cpu: Number((app.cpu + (index % 2 === 0 ? 1.7 : -0.9)).toFixed(1)),
-        })),
-      );
-      setIsRefreshing(false);
-    }, 850);
+  function removeToast(id: string) {
+    setToasts((currentToasts) =>
+      currentToasts.filter((toast) => toast.id !== id),
+    );
   }
 
-  function toggleAppStatus(id: string) {
-    setApps((currentApps) =>
-      currentApps.map((app) => {
-        if (app.id !== id) return app;
-        const nextStatus: AppStatus =
-          app.status === "running" ? "stopped" : "running";
-        return { ...app, status: nextStatus };
-      }),
-    );
+  function pushToast({
+    detail,
+    title,
+    tone = "success",
+  }: {
+    detail: string;
+    title: string;
+    tone?: ToastTone;
+  }) {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    setToasts((currentToasts) => [
+      ...currentToasts.slice(-2),
+      { id, detail, title, tone },
+    ]);
+
+    window.setTimeout(() => removeToast(id), 4200);
+  }
+
+  function formatCopy(template: string, values: Record<string, string>) {
+    return Object.entries(values).reduce((formatted, [key, value]) => {
+      return formatted.replaceAll(`{${key}}`, value);
+    }, template);
+  }
+
+  async function completeLogin(credentials: LoginRequestDto) {
+    const setupStatus = await controlPlaneClient.getSetupStatus();
+    const nextSession = setupStatus.requiresSetup
+      ? await controlPlaneClient.createOwner({
+          ...credentials,
+          displayName: credentials.username,
+        })
+      : await controlPlaneClient.login(credentials);
+
+    storeSession(nextSession);
+    setSession(nextSession);
+  }
+
+  async function logout() {
+    try {
+      await controlPlaneClient.logout();
+    } catch {
+      // Logging out must clear local access even if the backend session expired.
+    } finally {
+      localStorage.removeItem(sessionStorageKey);
+      setSession(null);
+      setApps([]);
+      setMetrics([]);
+      setStoreCatalog([]);
+      setStoragePools([]);
+      setView("dashboard");
+    }
+  }
+
+  async function refreshBackendData({ showToast = true } = {}) {
+    if (isRefreshing) return;
+
+    setIsRefreshing(true);
+
+    try {
+      const [summary, catalog] = await Promise.all([
+        controlPlaneClient.getSystemSummary(),
+        controlPlaneClient.listStoreApps(),
+      ]);
+
+      setApps(summary.apps);
+      setMetrics(summary.metrics);
+      setNodeName(summary.nodeName);
+      setStoragePools(summary.storagePools);
+      setStoreCatalog(catalog);
+      setUptime(summary.uptime);
+
+      if (showToast) {
+        pushToast({
+          title: dictionary[language].dashboard.toasts.refreshed.title,
+          detail: dictionary[language].dashboard.toasts.refreshed.detail,
+        });
+      }
+    } catch {
+      pushToast({
+        title: dictionary[language].dashboard.errors.refreshFailed,
+        detail: dictionary[language].common.tryAgain,
+        tone: "warning",
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
+  async function runBackendAppAction(appId: AppInstanceId, action: AppAction) {
+    if (pendingAppAction) return;
+
+    const app = apps.find((currentApp) => currentApp.id === appId);
+    if (!app) return;
+
+    setPendingAppAction({ appId, action });
+
+    try {
+      const nextApps = await controlPlaneClient.runAppAction({
+        action,
+        appId,
+        apps,
+      });
+      const toastCopy = dictionary[language].apps.toasts[action];
+
+      setApps(nextApps);
+      pushToast({
+        title: formatCopy(toastCopy.title, { app: app.name }),
+        detail: formatCopy(toastCopy.detail, { app: app.name }),
+        tone: action === "open" ? "info" : "success",
+      });
+    } catch {
+      pushToast({
+        title: dictionary[language].apps.errors.actionFailed,
+        detail: dictionary[language].common.tryAgain,
+        tone: "warning",
+      });
+    } finally {
+      setPendingAppAction(null);
+    }
+  }
+
+  async function installStoreApp(appId: StoreAppId) {
+    if (installingStoreAppId) return;
+
+    const app = storeCatalog.find((storeApp) => storeApp.id === appId);
+    if (!app) return;
+
+    setInstallingStoreAppId(appId);
+
+    try {
+      await controlPlaneClient.enqueueStoreInstall(appId);
+      pushToast({
+        title: formatCopy(dictionary[language].store.toasts.queued.title, {
+          app: app.name,
+        }),
+        detail: formatCopy(dictionary[language].store.toasts.queued.detail, {
+          app: app.name,
+        }),
+      });
+    } catch {
+      pushToast({
+        title: dictionary[language].store.errors.installFailed,
+        detail: dictionary[language].common.tryAgain,
+        tone: "warning",
+      });
+    } finally {
+      setInstallingStoreAppId(null);
+    }
+  }
+
+  function showAlertSummary() {
+    pushToast({
+      title: dictionary[language].common.alerts,
+      detail: dictionary[language].common.noAlerts,
+      tone: "info",
+    });
+  }
+
+  function runDashboardAction(action: DashboardAction) {
+    const toastCopy =
+      dictionary[language].dashboard.quickActions.toasts[action];
+    const actionMeta = quickActions.find((item) => item.id === action);
+
+    if (action === "openStore") {
+      setView("store");
+    }
+
+    pushToast({
+      title: toastCopy.title,
+      detail: toastCopy.detail,
+      tone: actionMeta?.tone ?? "info",
+    });
   }
 
   if (!isAuthenticated) {
@@ -91,7 +336,7 @@ function App() {
         setLanguage={setLanguage}
         theme={theme}
         setTheme={setTheme}
-        onLogin={() => setIsAuthenticated(true)}
+        onLogin={completeLogin}
       />
     );
   }
@@ -106,7 +351,8 @@ function App() {
         setView={setView}
         theme={theme}
         setTheme={setTheme}
-        onLogout={() => setIsAuthenticated(false)}
+        onLogout={logout}
+        onShowAlerts={showAlertSummary}
       />
 
       <main className="mx-auto grid w-full max-w-[1400px] grid-cols-1 gap-6 px-4 pb-16 pt-28 md:px-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-8 lg:pt-32">
@@ -120,8 +366,10 @@ function App() {
             <SideRail
               currentView={view}
               language={language}
+              nodeName={nodeName}
               setView={setView}
               runningCount={runningCount}
+              totalApps={apps.length}
             />
           </motion.div>
         </aside>
@@ -140,27 +388,37 @@ function App() {
                   apps={apps}
                   isRefreshing={isRefreshing}
                   language={language}
-                  onRefresh={refreshMockData}
+                  metrics={metrics}
+                  nodeName={nodeName}
+                  onDashboardAction={runDashboardAction}
+                  onRefresh={() => refreshBackendData()}
+                  storagePools={storagePools}
+                  uptime={uptime}
                 />
               )}
               {view === "apps" && (
                 <AppsView
                   apps={apps}
+                  pendingAction={pendingAppAction}
                   language={language}
-                  onToggleStatus={toggleAppStatus}
+                  onAppAction={runBackendAppAction}
                 />
               )}
               {view === "store" && (
                 <StoreView
                   apps={filteredStoreApps}
+                  installingAppId={installingStoreAppId}
                   language={language}
                   query={query}
                   setQuery={setQuery}
+                  onInstallApp={installStoreApp}
                 />
               )}
               {view === "settings" && (
                 <SettingsView
                   language={language}
+                  nodeName={nodeName}
+                  session={session}
                   setLanguage={setLanguage}
                   theme={theme}
                   setTheme={setTheme}
@@ -170,6 +428,7 @@ function App() {
           </AnimatePresence>
         </section>
       </main>
+      <ToastStack language={language} toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 }

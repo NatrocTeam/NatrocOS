@@ -27,7 +27,11 @@
     "dark": "Gelap",
     "indonesia": "Indonesia",
     "english": "English",
-    "backendNotice": "Backend belum aktif. Semua tombol menjalankan state mock di browser."
+    "working": "Memproses",
+    "dismiss": "Tutup notifikasi",
+    "tryAgain": "Coba ulang atau periksa gateway NatrocOS.",
+    "noAlerts": "Tidak ada peringatan aktif dari gateway.",
+    "backendNotice": "Terhubung ke gateway NatrocOS lokal melalui API live."
   },
   "navigation": {
     "dashboard": "Dasbor",
@@ -41,31 +45,39 @@
     "username": "Username",
     "usernameHelp": "Gunakan akun owner lokal.",
     "password": "Password",
-    "passwordHelp": "Mock login menerima minimal enam karakter.",
+    "passwordHelp": "Minimal delapan karakter. Login pertama akan membuat owner lokal.",
     "signIn": "Masuk",
     "signingIn": "Memverifikasi",
     "localOwner": "Owner lokal",
-    "nodeAddress": "192.168.11.42",
+    "nodeAddress": "Web UI lokal port 80",
+    "highlights": {
+      "dataRoot": "Data root",
+      "webPort": "Port Web UI",
+      "runtime": "Runtime aplikasi",
+      "passwordHash": "Hash password"
+    },
     "errors": {
-      "invalidCredentials": "Isi username dan password minimal enam karakter."
+      "invalidCredentials": "Isi username dan password minimal delapan karakter.",
+      "authFailed": "Login gagal. Periksa akun owner atau gateway NatrocOS."
     }
   },
   "dashboard": {
     "overview": "Ringkasan sistem",
-    "overviewCopy": "Data masih mock, tetapi layout mengikuti pola kerja server rumah yang akan dipakai backend Go.",
+    "overviewCopy": "Data dibaca langsung dari gateway lokal, Docker runtime, dan storage root /NatrocOS.",
     "allSystems": "Semua sistem berjalan",
     "warning": "Butuh perhatian",
     "storagePool": "Storage pool",
+    "storageUsed": "Terpakai",
     "liveApps": "Aplikasi aktif",
-    "liveAppsOnNode": "aplikasi aktif di node Helios",
+    "liveAppsOnNode": "aplikasi aktif",
     "eventStream": "Alur event",
     "runtimeFocus": "Fokus runtime",
-    "authMockReady": "Auth mock siap",
-    "authMockDetail": "session browser lokal",
+    "authReady": "Auth backend aktif",
+    "authDetail": "session token dari gateway",
     "storageScanned": "Storage dibaca",
-    "storageScannedDetail": "/DATA pool disimulasikan",
+    "storageScannedDetail": "pool /NatrocOS dibaca dari sistem",
     "containerCheck": "Container check",
-    "containerCheckDetail": "4 template terdaftar",
+    "containerCheckDetail": "{count} container ditemukan",
     "metrics": {
       "cpu": {
         "label": "CPU",
@@ -77,11 +89,57 @@
       },
       "storage": {
         "label": "Penyimpanan",
-        "detail": "pool utama /DATA"
+        "detail": "pool utama /NatrocOS"
       },
       "network": {
         "label": "Jaringan",
         "detail": "rx 52.1 / tx 32.5"
+      }
+    },
+    "quickActions": {
+      "eyebrow": "Aksi cepat",
+      "title": "Kontrol operasional",
+      "items": {
+        "scanStorage": {
+          "title": "Scan storage",
+          "detail": "Baca ulang mount, pool, dan kapasitas /NatrocOS."
+        },
+        "checkBackups": {
+          "title": "Cek backup",
+          "detail": "Validasi jadwal cadangan lokal terakhir."
+        },
+        "exportDiagnostics": {
+          "title": "Export diagnostik",
+          "detail": "Siapkan snapshot log dan metadata service."
+        },
+        "openStore": {
+          "title": "Buka katalog",
+          "detail": "Lanjut ke template aplikasi yang siap diantrekan."
+        }
+      },
+      "toasts": {
+        "scanStorage": {
+          "title": "Storage discan",
+          "detail": "Pool /NatrocOS selesai dibaca ulang dari gateway."
+        },
+        "checkBackups": {
+          "title": "Backup perlu dicek",
+          "detail": "Belum ada konfigurasi backup aktif."
+        },
+        "exportDiagnostics": {
+          "title": "Diagnostik siap",
+          "detail": "Permintaan diagnostik dicatat untuk service backend."
+        },
+        "openStore": {
+          "title": "Katalog dibuka",
+          "detail": "Pilih template aplikasi untuk antrean install berikutnya."
+        }
+      }
+    },
+    "toasts": {
+      "refreshed": {
+        "title": "Telemetry disegarkan",
+        "detail": "Data sistem, storage, dan container sudah diperbarui dari gateway."
       }
     },
     "errors": {
@@ -90,6 +148,7 @@
   },
   "apps": {
     "runtimeEyebrow": "Runtime container",
+    "empty": "Belum ada container yang terdaftar dari backend.",
     "updated": "Diperbarui",
     "memory": "Memori",
     "ports": "Port",
@@ -99,18 +158,22 @@
       "updating": "update",
       "error": "error"
     },
-    "instances": {
-      "vaultwarden": {
-        "updatedAt": "5 menit lalu"
+    "toasts": {
+      "open": {
+        "title": "{app} dibuka",
+        "detail": "Aksi buka dikirim ke gateway."
       },
-      "immich": {
-        "updatedAt": "18 menit lalu"
+      "restart": {
+        "title": "{app} direstart",
+        "detail": "Perintah restart dikirim ke Docker melalui gateway."
       },
-      "paperless": {
-        "updatedAt": "41 menit lalu"
+      "start": {
+        "title": "{app} berjalan",
+        "detail": "Perintah start dikirim ke Docker melalui gateway."
       },
-      "syncthing": {
-        "updatedAt": "2 jam lalu"
+      "stop": {
+        "title": "{app} dihentikan",
+        "detail": "Perintah stop dikirim ke Docker melalui gateway."
       }
     },
     "errors": {
@@ -119,37 +182,27 @@
   },
   "store": {
     "catalogEyebrow": "Katalog",
-    "catalogCopy": "Template compose terkurasi untuk layanan installer dan manajemen aplikasi nanti.",
+    "catalogCopy": "Katalog dibaca dari file JSON di /NatrocOS/store dan diproses oleh gateway.",
     "search": "Cari aplikasi",
+    "installing": "Mengantre",
     "emptyTitle": "Tidak ada hasil",
     "emptyCopy": "Ubah kata kunci pencarian atau reset filter.",
-    "apps": {
-      "jellyfin": {
-        "category": "Media",
-        "description": "Server media lokal untuk film, musik, dan koleksi keluarga."
-      },
-      "actual": {
-        "category": "Keuangan",
-        "description": "Pembukuan pribadi yang berjalan penuh di server sendiri."
-      },
-      "mealie": {
-        "category": "Dapur",
-        "description": "Katalog resep dan rencana belanja untuk rumah."
-      },
-      "minio": {
-        "category": "Penyimpanan",
-        "description": "Object storage S3-compatible untuk backup dan aplikasi lokal."
-      }
-    },
     "errors": {
-      "searchFailed": "Pencarian katalog gagal dijalankan."
+      "searchFailed": "Pencarian katalog gagal dijalankan.",
+      "installFailed": "Aplikasi gagal masuk antrean install."
+    },
+    "toasts": {
+      "queued": {
+        "title": "{app} masuk antrean",
+        "detail": "Permintaan install dikirim ke gateway."
+      }
     }
   },
   "settings": {
     "profileEyebrow": "Profil lokal",
-    "profileCopy": "Akun, lokalisasi, dan preferensi shell untuk prototipe frontend.",
+    "profileCopy": "Akun owner, lokalisasi, dan preferensi shell dari sesi backend.",
     "security": "Keamanan",
-    "argonPlanned": "Argon2id direncanakan",
+    "passwordHash": "PBKDF2-SHA256",
     "errors": {
       "saveFailed": "Preferensi belum bisa disimpan."
     }
