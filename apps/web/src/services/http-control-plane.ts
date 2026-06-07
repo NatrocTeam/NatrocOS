@@ -8,8 +8,12 @@ import type {
   RefreshSessionResponseDto,
   SetupStatusDto,
   StoreApp,
+  StoreInstallDeployResponseDto,
+  StoreInstallJobDto,
+  StoreInstallQueueProcessResponseDto,
   StoreInstallResponseDto,
   SystemSummaryDto,
+  UserAccountDto,
   UserSessionDto,
 } from "@/types/natrocos";
 import type { ControlPlaneClient } from "@/services/control-plane";
@@ -55,6 +59,16 @@ export function createHttpControlPlaneClient(
       );
     },
 
+    async createUser(request) {
+      return readJSON<UserAccountDto>(
+        await fetch(endpoint(API_ROUTES.users), {
+          body: JSON.stringify(request),
+          headers: headers({ "Content-Type": "application/json" }),
+          method: "POST",
+        }),
+      );
+    },
+
     async currentUser() {
       return readJSON<CurrentUserDto>(
         await fetch(endpoint(API_ROUTES.currentUser), {
@@ -80,6 +94,22 @@ export function createHttpControlPlaneClient(
     async listStoreApps() {
       return readJSON<StoreApp[]>(
         await fetch(endpoint(API_ROUTES.store), {
+          headers: headers(),
+        }),
+      );
+    },
+
+    async listUsers() {
+      return readJSON<UserAccountDto[]>(
+        await fetch(endpoint(API_ROUTES.users), {
+          headers: headers(),
+        }),
+      );
+    },
+
+    async listStoreQueue() {
+      return readJSON<StoreInstallJobDto[]>(
+        await fetch(endpoint(API_ROUTES.appManagementInstallQueue), {
           headers: headers(),
         }),
       );
@@ -149,7 +179,30 @@ export function createHttpControlPlaneClient(
         }),
       );
 
-      return payload.appId;
+      return payload;
+    },
+
+    async processStoreQueue() {
+      return readJSON<StoreInstallQueueProcessResponseDto>(
+        await fetch(endpoint(API_ROUTES.appManagementProcessQueue), {
+          headers: headers(),
+          method: "POST",
+        }),
+      );
+    },
+
+    async deployStoreQueueJob(jobId, request) {
+      const route = resolveRoute(API_ROUTES.appManagementDeployJob, {
+        id: jobId,
+      });
+
+      return readJSON<StoreInstallDeployResponseDto>(
+        await fetch(endpoint(route), {
+          body: JSON.stringify(request),
+          headers: headers({ "Content-Type": "application/json" }),
+          method: "POST",
+        }),
+      );
     },
   };
 }

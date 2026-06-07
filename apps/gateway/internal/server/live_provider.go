@@ -62,11 +62,12 @@ type dockerStats struct {
 }
 
 type userDatabase struct {
-	Owner    ownerRecord     `json:"owner"`
-	Sessions []sessionRecord `json:"sessions"`
+	LegacyOwner *userRecord     `json:"owner,omitempty"`
+	Users       []userRecord    `json:"users"`
+	Sessions    []sessionRecord `json:"sessions"`
 }
 
-type ownerRecord struct {
+type userRecord struct {
 	ID           string `json:"id"`
 	Username     string `json:"username"`
 	DisplayName  string `json:"displayName"`
@@ -225,10 +226,16 @@ func (p LiveProvider) StoreApps() ([]natrocos.StoreApp, error) {
 			if listErr := json.Unmarshal(content, &list); listErr != nil {
 				return nil, err
 			}
-			apps = append(apps, list...)
+			for _, listApp := range list {
+				listApp = normalizeStoreApp(listApp)
+				if listApp.ID != "" {
+					apps = append(apps, listApp)
+				}
+			}
 			continue
 		}
 
+		app = normalizeStoreApp(app)
 		if app.ID != "" {
 			apps = append(apps, app)
 		}
@@ -238,17 +245,43 @@ func (p LiveProvider) StoreApps() ([]natrocos.StoreApp, error) {
 }
 
 func (p LiveProvider) StoreInstall(appID string) (natrocos.StoreInstallResponse, error) {
+	appID = strings.TrimSpace(appID)
 	apps, err := p.StoreApps()
 	if err != nil {
 		return natrocos.StoreInstallResponse{}, err
 	}
 	for _, app := range apps {
 		if app.ID == appID {
-			return natrocos.StoreInstallResponse{}, fmt.Errorf("%w: app installation requires app-management compose installer", ErrNotImplemented)
+			return p.queueStoreInstall(app)
 		}
 	}
 
 	return natrocos.StoreInstallResponse{}, ErrNotFound
+}
+
+func normalizeStoreApp(app natrocos.StoreApp) natrocos.StoreApp {
+	app.ID = strings.TrimSpace(app.ID)
+	app.Name = strings.TrimSpace(app.Name)
+	if app.Name == "" {
+		app.Name = app.ID
+	}
+	app.Category = strings.TrimSpace(app.Category)
+	app.Description = strings.TrimSpace(app.Description)
+	app.Image = strings.TrimSpace(app.Image)
+	if app.Tags == nil {
+		app.Tags = []string{}
+	}
+
+	tags := make([]string, 0, len(app.Tags))
+	for _, tag := range app.Tags {
+		tag = strings.TrimSpace(tag)
+		if tag != "" {
+			tags = append(tags, tag)
+		}
+	}
+	app.Tags = tags
+
+	return app
 }
 
 func (p LiveProvider) SetupStatus() (natrocos.SetupStatus, error) {
@@ -256,11 +289,9 @@ func (p LiveProvider) SetupStatus() (natrocos.SetupStatus, error) {
 	if err != nil {
 		return natrocos.SetupStatus{}, err
 	}
-	if db.Owner.ID != "" {
-		return natrocos.SetupStatus{HasOwner: true, RequiresSetup: false}, nil
-	}
 
-	return natrocos.SetupStatus{HasOwner: false, RequiresSetup: true}, nil
+	_, hasOwner := db.owner()
+	return natrocos.SetupStatus{HasOwner: hasOwner, RequiresSetup: !hasOwner}, nil
 }
 
 func (p LiveProvider) CreateOwner(request natrocos.CreateOwnerRequest) (natrocos.UserSession, error) {
@@ -277,8 +308,8 @@ func (p LiveProvider) CreateOwner(request natrocos.CreateOwnerRequest) (natrocos
 	if err != nil {
 		return natrocos.UserSession{}, err
 	}
-	if db.Owner.ID != "" {
-		return natrocos.UserSession{}, fmt.Errorf("%w: owner already exists", ErrConflict)
+	if len(db.Users) > 0 {
+		return natrocos.UserSession{}, fmt.Errorf("%w: setup already completed", ErrConflict)
 	}
 
 	passwordHash, err := hashPassword(request.Password)
@@ -289,11 +320,11 @@ func (p LiveProvider) CreateOwner(request natrocos.CreateOwnerRequest) (natrocos
 	if err != nil {
 		return natrocos.UserSession{}, err
 	}
-	owner := ownerRecord{
+	owner := userRecord{
 		ID:           userID,
 		Username:     username,
 		DisplayName:  displayName,
-		Role:         "owner",
+		Role:         defaultRoleForNewUser(len(db.Users)),
 		PasswordHash: passwordHash,
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
@@ -302,7 +333,7 @@ func (p LiveProvider) CreateOwner(request natrocos.CreateOwnerRequest) (natrocos
 		return natrocos.UserSession{}, err
 	}
 
-	db.Owner = owner
+	db.Users = []userRecord{owner}
 	db.Sessions = []sessionRecord{{
 		Token:     session.AccessToken,
 		UserID:    owner.ID,
@@ -314,25 +345,98 @@ func (p LiveProvider) CreateOwner(request natrocos.CreateOwnerRequest) (natrocos
 	return session, nil
 }
 
+func (p LiveProvider) Users(token string) ([]natrocos.UserAccount, error) {
+	db, err := p.readUserDatabase()
+	if err != nil {
+		return nil, err
+	}
+
+	requester, ok := db.activeUserByToken(token)
+	if !ok {
+		return nil, ErrUnauthorized
+	}
+	if requester.Role != natrocos.RoleOwner {
+		return nil, ErrForbidden
+	}
+
+	users := make([]natrocos.UserAccount, 0, len(db.Users))
+	for _, user := range db.Users {
+		users = append(users, accountFromUser(user))
+	}
+	return users, nil
+}
+
+func (p LiveProvider) CreateUser(token string, request natrocos.CreateUserRequest) (natrocos.UserAccount, error) {
+	username := strings.TrimSpace(request.Username)
+	displayName := strings.TrimSpace(request.DisplayName)
+	if displayName == "" {
+		displayName = username
+	}
+	if len(username) < 3 || len(request.Password) < 8 {
+		return natrocos.UserAccount{}, fmt.Errorf("%w: username must be at least 3 characters and password at least 8 characters", ErrValidation)
+	}
+
+	db, err := p.readUserDatabase()
+	if err != nil {
+		return natrocos.UserAccount{}, err
+	}
+
+	requester, ok := db.activeUserByToken(token)
+	if !ok {
+		return natrocos.UserAccount{}, ErrUnauthorized
+	}
+	if requester.Role != natrocos.RoleOwner {
+		return natrocos.UserAccount{}, ErrForbidden
+	}
+	if _, hasOwner := db.owner(); !hasOwner {
+		return natrocos.UserAccount{}, fmt.Errorf("%w: first owner setup is required", ErrConflict)
+	}
+	if _, exists := db.userByUsername(username); exists {
+		return natrocos.UserAccount{}, fmt.Errorf("%w: username already exists", ErrConflict)
+	}
+
+	passwordHash, err := hashPassword(request.Password)
+	if err != nil {
+		return natrocos.UserAccount{}, err
+	}
+	userID, err := randomID("usr")
+	if err != nil {
+		return natrocos.UserAccount{}, err
+	}
+
+	user := userRecord{
+		ID:           userID,
+		Username:     username,
+		DisplayName:  displayName,
+		Role:         defaultRoleForNewUser(len(db.Users)),
+		PasswordHash: passwordHash,
+		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	db.Users = append(db.Users, user)
+	if err := p.writeUserDatabase(db); err != nil {
+		return natrocos.UserAccount{}, err
+	}
+
+	return accountFromUser(user), nil
+}
+
 func (p LiveProvider) AuthLogin(request natrocos.LoginRequest) (natrocos.UserSession, error) {
 	db, err := p.readUserDatabase()
 	if err != nil {
 		return natrocos.UserSession{}, err
 	}
-	if db.Owner.ID == "" {
-		return natrocos.UserSession{}, ErrUnauthorized
-	}
-	if db.Owner.Username != strings.TrimSpace(request.Username) || !verifyPassword(request.Password, db.Owner.PasswordHash) {
+	user, ok := db.userByUsername(strings.TrimSpace(request.Username))
+	if !ok || !verifyPassword(request.Password, user.PasswordHash) {
 		return natrocos.UserSession{}, ErrUnauthorized
 	}
 
-	session, err := newSession(db.Owner)
+	session, err := newSession(user)
 	if err != nil {
 		return natrocos.UserSession{}, err
 	}
 	db.Sessions = append(pruneExpiredSessions(db.Sessions), sessionRecord{
 		Token:     session.AccessToken,
-		UserID:    db.Owner.ID,
+		UserID:    user.ID,
 		ExpiresAt: session.ExpiresAt,
 	})
 	if err := p.writeUserDatabase(db); err != nil {
@@ -348,6 +452,9 @@ func (p LiveProvider) AuthRefresh(token string) (natrocos.RefreshSessionResponse
 	}
 	index, ok := findActiveSession(db.Sessions, token)
 	if !ok {
+		return natrocos.RefreshSessionResponse{}, ErrUnauthorized
+	}
+	if _, ok := db.userByID(db.Sessions[index].UserID); !ok {
 		return natrocos.RefreshSessionResponse{}, ErrUnauthorized
 	}
 
@@ -385,14 +492,19 @@ func (p LiveProvider) CurrentUser(token string) (natrocos.CurrentUser, error) {
 		return natrocos.CurrentUser{}, err
 	}
 	index, ok := findActiveSession(db.Sessions, token)
-	if !ok || db.Sessions[index].UserID != db.Owner.ID {
+	if !ok {
 		return natrocos.CurrentUser{}, ErrUnauthorized
 	}
+	user, ok := db.userByID(db.Sessions[index].UserID)
+	if !ok {
+		return natrocos.CurrentUser{}, ErrUnauthorized
+	}
+
 	return natrocos.CurrentUser{
-		UserID:      db.Owner.ID,
-		Username:    db.Owner.Username,
-		DisplayName: db.Owner.DisplayName,
-		Role:        db.Owner.Role,
+		UserID:      user.ID,
+		Username:    user.Username,
+		DisplayName: user.DisplayName,
+		Role:        user.Role,
 	}, nil
 }
 
@@ -422,6 +534,88 @@ func (p LiveProvider) userDatabasePath() string {
 	return filepath.Join(p.dataRoot, filepath.FromSlash(userDatabaseRelativePath))
 }
 
+func (p LiveProvider) installQueueDir() string {
+	return filepath.Join(p.dataRoot, filepath.FromSlash(natrocos.AppInstallQueueRelativePath))
+}
+
+func (p LiveProvider) queueStoreInstall(app natrocos.StoreApp) (natrocos.StoreInstallResponse, error) {
+	jobID, err := randomID("install")
+	if err != nil {
+		return natrocos.StoreInstallResponse{}, err
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	normalizedApp := normalizeStoreApp(app)
+	dataPath := filepath.Join(p.dataRoot, "apps", normalizedApp.ID)
+	entry := natrocos.StoreInstallJob{
+		JobID:    jobID,
+		App:      normalizedApp,
+		Status:   natrocos.StoreInstallJobQueued,
+		QueuedAt: now,
+		Plan: natrocos.StoreInstallPlan{
+			DataPath:    dataPath,
+			ComposePath: filepath.Join(dataPath, "compose.yaml"),
+			Image:       normalizedApp.Image,
+			ServiceName: composeServiceName(normalizedApp.ID),
+			Tags:        normalizedApp.Tags,
+		},
+	}
+
+	if err := p.writeInstallQueueEntry(entry); err != nil {
+		return natrocos.StoreInstallResponse{}, err
+	}
+
+	return natrocos.StoreInstallResponse{
+		AppID:    entry.App.ID,
+		JobID:    entry.JobID,
+		QueuedAt: entry.QueuedAt,
+		Status:   entry.Status,
+	}, nil
+}
+
+func (p LiveProvider) writeInstallQueueEntry(entry natrocos.StoreInstallJob) error {
+	queueDir := p.installQueueDir()
+	if err := os.MkdirAll(queueDir, 0o700); err != nil {
+		return err
+	}
+
+	content, err := json.MarshalIndent(entry, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	path := filepath.Join(queueDir, entry.JobID+".json")
+	tempPath := path + ".tmp"
+	if err := os.WriteFile(tempPath, content, natrocos.AppInstallQueueFilePermission); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, path)
+}
+
+func composeServiceName(value string) string {
+	var builder strings.Builder
+	lastDash := false
+	for _, char := range strings.ToLower(value) {
+		switch {
+		case char >= 'a' && char <= 'z', char >= '0' && char <= '9':
+			builder.WriteRune(char)
+			lastDash = false
+		case !lastDash:
+			builder.WriteByte('-')
+			lastDash = true
+		}
+	}
+
+	name := strings.Trim(builder.String(), "-")
+	if name == "" {
+		return "app"
+	}
+	if name[0] >= '0' && name[0] <= '9' {
+		return "app-" + name
+	}
+	return name
+}
+
 func (p LiveProvider) readUserDatabase() (userDatabase, error) {
 	content, err := os.ReadFile(p.userDatabasePath())
 	if err != nil {
@@ -438,7 +632,7 @@ func (p LiveProvider) readUserDatabase() (userDatabase, error) {
 	if err := json.Unmarshal(content, &db); err != nil {
 		return userDatabase{}, err
 	}
-	return db, nil
+	return normalizeUserDatabase(db), nil
 }
 
 func (p LiveProvider) writeUserDatabase(db userDatabase) error {
@@ -504,7 +698,99 @@ func verifyPassword(password string, encodedHash string) bool {
 	return subtle.ConstantTimeCompare(actual, expected) == 1
 }
 
-func newSession(owner ownerRecord) (natrocos.UserSession, error) {
+func normalizeUserDatabase(db userDatabase) userDatabase {
+	normalized := userDatabase{
+		Users:    []userRecord{},
+		Sessions: db.Sessions,
+	}
+	seenUsers := map[string]bool{}
+
+	if db.LegacyOwner != nil {
+		normalized.addUser(*db.LegacyOwner, seenUsers)
+	}
+	for _, user := range db.Users {
+		normalized.addUser(user, seenUsers)
+	}
+
+	for index := range normalized.Users {
+		normalized.Users[index].Username = strings.TrimSpace(normalized.Users[index].Username)
+		normalized.Users[index].DisplayName = strings.TrimSpace(normalized.Users[index].DisplayName)
+		if normalized.Users[index].DisplayName == "" {
+			normalized.Users[index].DisplayName = normalized.Users[index].Username
+		}
+
+		if index == 0 {
+			normalized.Users[index].Role = natrocos.RoleOwner
+		} else {
+			normalized.Users[index].Role = natrocos.RoleUser
+		}
+	}
+
+	return normalized
+}
+
+func (db *userDatabase) addUser(user userRecord, seenUsers map[string]bool) {
+	if user.ID == "" || seenUsers[user.ID] {
+		return
+	}
+
+	seenUsers[user.ID] = true
+	db.Users = append(db.Users, user)
+}
+
+func (db userDatabase) owner() (userRecord, bool) {
+	for _, user := range db.Users {
+		if user.Role == natrocos.RoleOwner {
+			return user, true
+		}
+	}
+	return userRecord{}, false
+}
+
+func (db userDatabase) userByUsername(username string) (userRecord, bool) {
+	for _, user := range db.Users {
+		if user.Username == username {
+			return user, true
+		}
+	}
+	return userRecord{}, false
+}
+
+func (db userDatabase) userByID(id string) (userRecord, bool) {
+	for _, user := range db.Users {
+		if user.ID == id {
+			return user, true
+		}
+	}
+	return userRecord{}, false
+}
+
+func (db userDatabase) activeUserByToken(token string) (userRecord, bool) {
+	index, ok := findActiveSession(db.Sessions, token)
+	if !ok {
+		return userRecord{}, false
+	}
+	return db.userByID(db.Sessions[index].UserID)
+}
+
+func accountFromUser(user userRecord) natrocos.UserAccount {
+	return natrocos.UserAccount{
+		UserID:      user.ID,
+		Username:    user.Username,
+		DisplayName: user.DisplayName,
+		Role:        user.Role,
+		CreatedAt:   user.CreatedAt,
+	}
+}
+
+func defaultRoleForNewUser(existingUserCount int) string {
+	if existingUserCount == 0 {
+		return natrocos.RoleOwner
+	}
+	return natrocos.RoleUser
+}
+
+func newSession(owner userRecord) (natrocos.UserSession, error) {
 	token, err := randomToken()
 	if err != nil {
 		return natrocos.UserSession{}, err

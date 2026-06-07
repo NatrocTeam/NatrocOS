@@ -18,15 +18,18 @@ import type {
   AppInstanceId,
   DashboardAction,
   Language,
+  CreateUserRequestDto,
   LoginRequestDto,
   PendingAppAction,
   StoragePoolDto,
   StoreApp,
   StoreAppId,
+  StoreInstallJobDto,
   SystemMetricDto,
   Theme,
   ToastMessage,
   ToastTone,
+  UserAccountDto,
   UserSessionDto,
   View,
 } from "@/types/natrocos";
@@ -60,6 +63,22 @@ function storeSession(session: UserSessionDto) {
   localStorage.setItem(sessionStorageKey, JSON.stringify(session));
 }
 
+function upsertStoreQueueJob(
+  jobs: StoreInstallJobDto[],
+  nextJob: StoreInstallJobDto,
+) {
+  const existingIndex = jobs.findIndex((job) => job.jobId === nextJob.jobId);
+  if (existingIndex === -1) {
+    return [nextJob, ...jobs];
+  }
+
+  return jobs.map((job, index) => (index === existingIndex ? nextJob : job));
+}
+
+function compactCommand(command: string) {
+  return command.length > 96 ? `${command.slice(0, 93)}...` : command;
+}
+
 function App() {
   const [language, setLanguage] = useState<Language>(() => {
     return (localStorage.getItem("natrocos-language") as Language) || "en";
@@ -73,6 +92,8 @@ function App() {
   const [view, setView] = useState<View>("dashboard");
   const [apps, setApps] = useState<AppInstance[]>([]);
   const [storeCatalog, setStoreCatalog] = useState<StoreApp[]>([]);
+  const [storeQueue, setStoreQueue] = useState<StoreInstallJobDto[]>([]);
+  const [users, setUsers] = useState<UserAccountDto[]>([]);
   const [metrics, setMetrics] = useState<SystemMetricDto[]>([]);
   const [storagePools, setStoragePools] = useState<StoragePoolDto[]>([]);
   const [nodeName, setNodeName] = useState("");
@@ -83,6 +104,13 @@ function App() {
     useState<PendingAppAction | null>(null);
   const [installingStoreAppId, setInstallingStoreAppId] =
     useState<StoreAppId | null>(null);
+  const [isStoreQueueRefreshing, setIsStoreQueueRefreshing] = useState(false);
+  const [isProcessingStoreQueue, setIsProcessingStoreQueue] = useState(false);
+  const [isUsersRefreshing, setIsUsersRefreshing] = useState(false);
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [deployingStoreJobId, setDeployingStoreJobId] = useState<string | null>(
+    null,
+  );
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const isAuthenticated = Boolean(session);
   const controlPlaneClient = useMemo(
@@ -121,6 +149,30 @@ function App() {
         setStoragePools(summary.storagePools);
         setStoreCatalog(catalog);
         setUptime(summary.uptime);
+
+        try {
+          const queue = await controlPlaneClient.listStoreQueue();
+          if (isActive) {
+            setStoreQueue(queue);
+          }
+        } catch {
+          if (isActive) {
+            setStoreQueue([]);
+          }
+        }
+
+        if (session?.role === "owner") {
+          try {
+            const accounts = await controlPlaneClient.listUsers();
+            if (isActive) {
+              setUsers(accounts);
+            }
+          } catch {
+            if (isActive) {
+              setUsers([]);
+            }
+          }
+        }
       } finally {
         if (isActive) {
           setIsRefreshing(false);
@@ -131,7 +183,7 @@ function App() {
     return () => {
       isActive = false;
     };
-  }, [controlPlaneClient, isAuthenticated]);
+  }, [controlPlaneClient, isAuthenticated, session?.role]);
 
   const runningCount = apps.filter((app) => app.status === "running").length;
 
@@ -203,8 +255,37 @@ function App() {
       setApps([]);
       setMetrics([]);
       setStoreCatalog([]);
+      setStoreQueue([]);
+      setUsers([]);
       setStoragePools([]);
       setView("dashboard");
+    }
+  }
+
+  async function refreshStoreQueue({ showToast = false } = {}) {
+    if (isStoreQueueRefreshing) return;
+
+    setIsStoreQueueRefreshing(true);
+
+    try {
+      const queue = await controlPlaneClient.listStoreQueue();
+      setStoreQueue(queue);
+
+      if (showToast) {
+        pushToast({
+          title: dictionary[language].store.toasts.queueRefreshed.title,
+          detail: dictionary[language].store.toasts.queueRefreshed.detail,
+          tone: "info",
+        });
+      }
+    } catch {
+      pushToast({
+        title: dictionary[language].store.errors.queueFailed,
+        detail: dictionary[language].common.tryAgain,
+        tone: "warning",
+      });
+    } finally {
+      setIsStoreQueueRefreshing(false);
     }
   }
 
@@ -214,9 +295,13 @@ function App() {
     setIsRefreshing(true);
 
     try {
-      const [summary, catalog] = await Promise.all([
+      const [summary, catalog, queue, accounts] = await Promise.all([
         controlPlaneClient.getSystemSummary(),
         controlPlaneClient.listStoreApps(),
+        controlPlaneClient.listStoreQueue().catch(() => null),
+        session?.role === "owner"
+          ? controlPlaneClient.listUsers().catch(() => null)
+          : Promise.resolve(null),
       ]);
 
       setApps(summary.apps);
@@ -225,6 +310,12 @@ function App() {
       setStoragePools(summary.storagePools);
       setStoreCatalog(catalog);
       setUptime(summary.uptime);
+      if (queue) {
+        setStoreQueue(queue);
+      }
+      if (accounts) {
+        setUsers(accounts);
+      }
 
       if (showToast) {
         pushToast({
@@ -240,6 +331,67 @@ function App() {
       });
     } finally {
       setIsRefreshing(false);
+    }
+  }
+
+  async function refreshUsers({ showToast = false } = {}) {
+    if (isUsersRefreshing || session?.role !== "owner") return;
+
+    setIsUsersRefreshing(true);
+
+    try {
+      const accounts = await controlPlaneClient.listUsers();
+      setUsers(accounts);
+
+      if (showToast) {
+        pushToast({
+          title: dictionary[language].settings.toasts.usersRefreshed.title,
+          detail: dictionary[language].settings.toasts.usersRefreshed.detail,
+          tone: "info",
+        });
+      }
+    } catch {
+      pushToast({
+        title: dictionary[language].settings.errors.usersFailed,
+        detail: dictionary[language].common.tryAgain,
+        tone: "warning",
+      });
+    } finally {
+      setIsUsersRefreshing(false);
+    }
+  }
+
+  async function createLocalUser(request: CreateUserRequestDto) {
+    if (isCreatingUser || session?.role !== "owner") return;
+
+    setIsCreatingUser(true);
+
+    try {
+      const account = await controlPlaneClient.createUser(request);
+      setUsers((currentUsers) => [...currentUsers, account]);
+      try {
+        setUsers(await controlPlaneClient.listUsers());
+      } catch {
+        setUsers((currentUsers) => currentUsers);
+      }
+
+      pushToast({
+        title: formatCopy(
+          dictionary[language].settings.toasts.userCreated.title,
+          {
+            user: account.username,
+          },
+        ),
+        detail: dictionary[language].settings.toasts.userCreated.detail,
+      });
+    } catch {
+      pushToast({
+        title: dictionary[language].settings.errors.createUserFailed,
+        detail: dictionary[language].common.tryAgain,
+        tone: "warning",
+      });
+    } finally {
+      setIsCreatingUser(false);
     }
   }
 
@@ -285,13 +437,19 @@ function App() {
     setInstallingStoreAppId(appId);
 
     try {
-      await controlPlaneClient.enqueueStoreInstall(appId);
+      const installJob = await controlPlaneClient.enqueueStoreInstall(appId);
+      try {
+        setStoreQueue(await controlPlaneClient.listStoreQueue());
+      } catch {
+        setStoreQueue((currentQueue) => currentQueue);
+      }
       pushToast({
         title: formatCopy(dictionary[language].store.toasts.queued.title, {
           app: app.name,
         }),
         detail: formatCopy(dictionary[language].store.toasts.queued.detail, {
           app: app.name,
+          job: installJob.jobId,
         }),
       });
     } catch {
@@ -302,6 +460,83 @@ function App() {
       });
     } finally {
       setInstallingStoreAppId(null);
+    }
+  }
+
+  async function processStoreQueue() {
+    if (isProcessingStoreQueue) return;
+
+    setIsProcessingStoreQueue(true);
+
+    try {
+      const response = await controlPlaneClient.processStoreQueue();
+      try {
+        setStoreQueue(await controlPlaneClient.listStoreQueue());
+      } catch {
+        setStoreQueue(response.jobs);
+      }
+
+      pushToast({
+        title: dictionary[language].store.toasts.queueProcessed.title,
+        detail: formatCopy(
+          dictionary[language].store.toasts.queueProcessed.detail,
+          {
+            failed: String(response.failed),
+            processed: String(response.processed),
+            ready: String(response.ready),
+          },
+        ),
+      });
+    } catch {
+      pushToast({
+        title: dictionary[language].store.errors.processFailed,
+        detail: dictionary[language].common.tryAgain,
+        tone: "warning",
+      });
+    } finally {
+      setIsProcessingStoreQueue(false);
+    }
+  }
+
+  async function deployStoreQueueDryRun(jobId: string) {
+    if (deployingStoreJobId) return;
+
+    setDeployingStoreJobId(jobId);
+
+    try {
+      const response = await controlPlaneClient.deployStoreQueueJob(jobId, {
+        confirm: false,
+        dryRun: true,
+        pull: false,
+      });
+      setStoreQueue((currentQueue) =>
+        upsertStoreQueueJob(currentQueue, response.job),
+      );
+      try {
+        setStoreQueue(await controlPlaneClient.listStoreQueue());
+      } catch {
+        setStoreQueue((currentQueue) => currentQueue);
+      }
+
+      pushToast({
+        title: dictionary[language].store.toasts.deployDryRun.title,
+        detail: formatCopy(
+          dictionary[language].store.toasts.deployDryRun.detail,
+          {
+            command: compactCommand(response.command.join(" ")),
+            job: response.job.jobId,
+          },
+        ),
+        tone: "info",
+      });
+    } catch {
+      pushToast({
+        title: dictionary[language].store.errors.deployFailed,
+        detail: dictionary[language].common.tryAgain,
+        tone: "warning",
+      });
+    } finally {
+      setDeployingStoreJobId(null);
     }
   }
 
@@ -407,21 +642,33 @@ function App() {
               {view === "store" && (
                 <StoreView
                   apps={filteredStoreApps}
+                  deployingJobId={deployingStoreJobId}
                   installingAppId={installingStoreAppId}
+                  isProcessingQueue={isProcessingStoreQueue}
+                  isQueueRefreshing={isStoreQueueRefreshing}
                   language={language}
                   query={query}
+                  queue={storeQueue}
                   setQuery={setQuery}
+                  onDeployDryRun={deployStoreQueueDryRun}
                   onInstallApp={installStoreApp}
+                  onProcessQueue={processStoreQueue}
+                  onRefreshQueue={() => refreshStoreQueue({ showToast: true })}
                 />
               )}
               {view === "settings" && (
                 <SettingsView
+                  isCreatingUser={isCreatingUser}
+                  isUsersRefreshing={isUsersRefreshing}
                   language={language}
                   nodeName={nodeName}
                   session={session}
                   setLanguage={setLanguage}
                   theme={theme}
+                  users={users}
                   setTheme={setTheme}
+                  onCreateUser={createLocalUser}
+                  onRefreshUsers={() => refreshUsers({ showToast: true })}
                 />
               )}
             </motion.div>

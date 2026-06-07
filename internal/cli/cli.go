@@ -38,6 +38,7 @@ type Options struct {
 	Commit     string
 	Date       string
 	HTTPClient *http.Client
+	Stdin      io.Reader
 	Stderr     io.Writer
 	Stdout     io.Writer
 	Version    string
@@ -74,6 +75,18 @@ type apiRequestOptions struct {
 	Body string
 }
 
+type storeQueueDeployOptions struct {
+	DryRun bool
+	Pull   bool
+	Yes    bool
+}
+
+type setupOwnerOptions struct {
+	DisplayName   string
+	PasswordStdin bool
+	Username      string
+}
+
 func Execute(ctx context.Context, args []string, options Options) int {
 	runner := newRunner(options)
 	return runner.execute(ctx, args)
@@ -83,6 +96,7 @@ type runner struct {
 	commit     string
 	date       string
 	httpClient *http.Client
+	stdin      io.Reader
 	stderr     io.Writer
 	stdout     io.Writer
 	version    string
@@ -98,6 +112,9 @@ func newRunner(options Options) runner {
 	if options.HTTPClient == nil {
 		options.HTTPClient = http.DefaultClient
 	}
+	if options.Stdin == nil {
+		options.Stdin = os.Stdin
+	}
 	if options.Version == "" {
 		options.Version = "dev"
 	}
@@ -112,6 +129,7 @@ func newRunner(options Options) runner {
 		commit:     options.Commit,
 		date:       options.Date,
 		httpClient: options.HTTPClient,
+		stdin:      options.Stdin,
 		stderr:     options.Stderr,
 		stdout:     options.Stdout,
 		version:    options.Version,
@@ -329,7 +347,43 @@ func (r runner) runSetup(ctx context.Context, global globals, client apiClient, 
 		r.printf("has owner: %t\nrequires setup: %t\n", status.HasOwner, status.RequiresSetup)
 		return ExitSuccess
 	case "owner":
-		return r.notImplemented("setup owner is planned after auth backend is implemented")
+		setupOptions, err := parseSetupOwnerOptions(args[1:])
+		if err != nil {
+			r.errorf("%v\n", err)
+			return ExitInvalidUsage
+		}
+		if setupOptions.Username == "" || !setupOptions.PasswordStdin {
+			r.errorf("usage: natrocos setup owner --username <name> [--display-name <name>] --password-stdin\n")
+			return ExitInvalidUsage
+		}
+
+		passwordBytes, err := io.ReadAll(r.stdin)
+		if err != nil {
+			r.errorf("read password from stdin: %v\n", err)
+			return ExitGenericError
+		}
+		password := strings.TrimRight(string(passwordBytes), "\r\n")
+
+		request := natrocos.CreateOwnerRequest{
+			Username:    setupOptions.Username,
+			Password:    password,
+			DisplayName: setupOptions.DisplayName,
+		}
+		body, err := json.Marshal(request)
+		if err != nil {
+			r.errorf("%v\n", err)
+			return ExitGenericError
+		}
+		var session natrocos.UserSession
+		if exit := r.postJSON(ctx, client, "/api/setup/owner", string(body), &session); exit != ExitSuccess {
+			return exit
+		}
+
+		if global.JSON {
+			return r.writeJSON(session)
+		}
+		r.printf("created: %s\nrole: %s\nexpires: %s\n", session.Username, session.Role, session.ExpiresAt)
+		return ExitSuccess
 	default:
 		r.errorf("unknown setup command %q\n", args[0])
 		return ExitInvalidUsage
@@ -386,7 +440,7 @@ func (r runner) runApp(ctx context.Context, global globals, client apiClient, ar
 
 func (r runner) runStore(ctx context.Context, global globals, client apiClient, args []string) int {
 	if len(args) == 0 {
-		r.errorf("usage: natrocos store <list|show|install|repo>\n")
+		r.errorf("usage: natrocos store <list|show|install|queue|repo>\n")
 		return ExitInvalidUsage
 	}
 
@@ -431,10 +485,41 @@ func (r runner) runStore(ctx context.Context, global globals, client apiClient, 
 			return r.runStoreInstallDryRun(ctx, global, client, args[1])
 		}
 		return r.runStoreInstall(ctx, global, client, args[1])
+	case "queue":
+		return r.runStoreQueue(ctx, global, client, args[1:])
 	case "repo":
 		return r.notImplemented("store repo is planned but not implemented yet")
 	default:
 		r.errorf("unknown store command %q\n", args[0])
+		return ExitInvalidUsage
+	}
+}
+
+func (r runner) runStoreQueue(ctx context.Context, global globals, client apiClient, args []string) int {
+	if len(args) == 0 {
+		r.errorf("usage: natrocos store queue <list|process|deploy>\n")
+		return ExitInvalidUsage
+	}
+
+	switch args[0] {
+	case "list":
+		return r.runStoreQueueList(ctx, global, client)
+	case "process":
+		return r.runStoreQueueProcess(ctx, global, client)
+	case "deploy":
+		if len(args) < 2 {
+			r.errorf("usage: natrocos store queue deploy <job-id> [--dry-run|--yes] [--pull]\n")
+			return ExitInvalidUsage
+		}
+
+		options, err := parseStoreQueueDeployOptions(args[2:])
+		if err != nil {
+			r.errorf("%v\n", err)
+			return ExitInvalidUsage
+		}
+		return r.runStoreQueueDeploy(ctx, global, client, args[1], options)
+	default:
+		r.errorf("unknown store queue command %q\n", args[0])
 		return ExitInvalidUsage
 	}
 }
@@ -538,7 +623,7 @@ func (r runner) runStoreInstall(ctx context.Context, global globals, client apiC
 	if global.JSON {
 		return r.writeJSON(response)
 	}
-	r.printf("%s: %s\n", response.AppID, response.Status)
+	r.printf("%s: %s\njob: %s\nqueued: %s\n", response.AppID, response.Status, response.JobID, response.QueuedAt)
 	return ExitSuccess
 }
 
@@ -558,6 +643,79 @@ func (r runner) runStoreInstallDryRun(ctx context.Context, global globals, clien
 		return r.writeJSON(plan)
 	}
 	r.printf("Dry run install plan\napp: %s\nimage: %s\nstatus: no changes applied\n", storeApp.ID, storeApp.Image)
+	return ExitSuccess
+}
+
+func (r runner) runStoreQueueList(ctx context.Context, global globals, client apiClient) int {
+	var jobs []natrocos.StoreInstallJob
+	if exit := r.getJSON(ctx, client, natrocos.RouteAppManagementInstallQueue, &jobs); exit != ExitSuccess {
+		return exit
+	}
+
+	if global.JSON {
+		return r.writeJSON(jobs)
+	}
+	if len(jobs) == 0 {
+		r.printf("No install queue jobs.\n")
+		return ExitSuccess
+	}
+	for _, job := range jobs {
+		r.printf("%-28s %-9s app=%s image=%s\n", job.JobID, job.Status, job.App.ID, job.Plan.Image)
+	}
+	return ExitSuccess
+}
+
+func (r runner) runStoreQueueProcess(ctx context.Context, global globals, client apiClient) int {
+	var response natrocos.StoreInstallQueueProcessResponse
+	if exit := r.postJSON(ctx, client, "/api/app-management/install-queue/process", "", &response); exit != ExitSuccess {
+		return exit
+	}
+
+	if global.JSON {
+		return r.writeJSON(response)
+	}
+	r.printf("processed: %d\nready: %d\nfailed: %d\n", response.Processed, response.Ready, response.Failed)
+	for _, job := range response.Jobs {
+		r.printf("%-28s %-9s app=%s compose=%s\n", job.JobID, job.Status, job.App.ID, job.Plan.ComposePath)
+	}
+	return ExitSuccess
+}
+
+func (r runner) runStoreQueueDeploy(ctx context.Context, global globals, client apiClient, jobID string, options storeQueueDeployOptions) int {
+	request := natrocos.StoreInstallDeployRequest{
+		DryRun:  !options.Yes,
+		Pull:    options.Pull,
+		Confirm: options.Yes,
+	}
+	if options.DryRun {
+		request.DryRun = true
+		request.Confirm = false
+	}
+
+	body, err := json.Marshal(request)
+	if err != nil {
+		r.errorf("%v\n", err)
+		return ExitGenericError
+	}
+
+	var response natrocos.StoreInstallDeployResponse
+	path := fmt.Sprintf("/api/app-management/install-queue/%s/deploy", jobID)
+	if exit := r.postJSON(ctx, client, path, string(body), &response); exit != ExitSuccess {
+		return exit
+	}
+
+	if global.JSON {
+		return r.writeJSON(response)
+	}
+
+	mode := "dry-run"
+	if !response.DryRun {
+		mode = "executed"
+	}
+	r.printf("%s: %s\nmode: %s\ncommand: %s\n", response.Job.JobID, response.Job.Status, mode, strings.Join(response.Command, " "))
+	if response.Output != "" {
+		r.printf("output: %s\n", response.Output)
+	}
 	return ExitSuccess
 }
 
@@ -852,6 +1010,63 @@ func parseAPIRequestOptions(args []string) ([]string, apiRequestOptions, error) 
 	return remaining, options, nil
 }
 
+func parseStoreQueueDeployOptions(args []string) (storeQueueDeployOptions, error) {
+	options := storeQueueDeployOptions{}
+	for _, arg := range args {
+		switch arg {
+		case "--dry-run":
+			options.DryRun = true
+		case "--pull":
+			options.Pull = true
+		case "--yes":
+			options.Yes = true
+		default:
+			return options, fmt.Errorf("unknown deploy option %q", arg)
+		}
+	}
+	if options.DryRun && options.Yes {
+		return options, errors.New("--dry-run and --yes cannot be used together")
+	}
+	return options, nil
+}
+
+func parseSetupOwnerOptions(args []string) (setupOwnerOptions, error) {
+	options := setupOwnerOptions{}
+
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		switch {
+		case arg == "--username" || arg == "--display-name":
+			if index+1 >= len(args) {
+				return options, fmt.Errorf("%s requires a value", arg)
+			}
+			index++
+			applySetupOwnerValue(&options, arg, args[index])
+		case strings.HasPrefix(arg, "--username="):
+			applySetupOwnerValue(&options, "--username", strings.TrimPrefix(arg, "--username="))
+		case strings.HasPrefix(arg, "--display-name="):
+			applySetupOwnerValue(&options, "--display-name", strings.TrimPrefix(arg, "--display-name="))
+		case arg == "--password-stdin":
+			options.PasswordStdin = true
+		default:
+			return options, fmt.Errorf("unknown setup owner option %q", arg)
+		}
+	}
+
+	options.Username = strings.TrimSpace(options.Username)
+	options.DisplayName = strings.TrimSpace(options.DisplayName)
+	return options, nil
+}
+
+func applySetupOwnerValue(options *setupOwnerOptions, flag string, value string) {
+	switch flag {
+	case "--username":
+		options.Username = value
+	case "--display-name":
+		options.DisplayName = value
+	}
+}
+
 func hasLocalFlag(args []string, flag string) bool {
 	for _, arg := range args {
 		if arg == flag {
@@ -936,6 +1151,7 @@ Commands:
   doctor                   Run read-only API diagnostics
   health services          Check gateway health endpoint
   setup status             Show first-owner setup status
+  setup owner              Create the first owner from stdin password
   app list                 List managed apps
   app show <app-id>        Show one managed app
   app start <app-id>       Start an app through gateway
@@ -944,6 +1160,9 @@ Commands:
   store list               List catalog apps
   store show <app-id>      Show one catalog app
   store install <app-id>   Queue catalog app install
+  store queue list         List queued app installs
+  store queue process      Materialize queued installs
+  store queue deploy <id>  Dry-run or deploy a queued install
   storage summary          Show storage pool summary
   storage pool list        List storage pools
   api get <path>           Debug API GET
@@ -968,6 +1187,9 @@ const storeHelp = `Usage:
   natrocos store list [--json]
   natrocos store show <store-app-id> [--json]
   natrocos store install <store-app-id> [--dry-run] [--json]
+  natrocos store queue list [--json]
+  natrocos store queue process [--json]
+  natrocos store queue deploy <job-id> [--dry-run|--yes] [--pull] [--json]
 
 Planned:
   natrocos store repo list/add/remove/sync

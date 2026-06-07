@@ -41,14 +41,14 @@
   },
   "login": {
     "loginTitle": "Masuk ke ruang kendali lokal",
-    "loginCopy": "Pantau server, aplikasi, storage, dan sesi admin dari satu permukaan kerja yang tenang.",
+    "loginCopy": "Pantau server, aplikasi, storage, dan sesi pengguna dari satu permukaan kerja yang tenang.",
     "username": "Username",
-    "usernameHelp": "Gunakan akun owner lokal.",
+    "usernameHelp": "Gunakan akun lokal NatrocOS.",
     "password": "Password",
     "passwordHelp": "Minimal delapan karakter. Login pertama akan membuat owner lokal.",
     "signIn": "Masuk",
     "signingIn": "Memverifikasi",
-    "localOwner": "Owner lokal",
+    "localOwner": "Akun lokal",
     "nodeAddress": "Web UI lokal port 80",
     "highlights": {
       "dataRoot": "Data root",
@@ -58,7 +58,7 @@
     },
     "errors": {
       "invalidCredentials": "Isi username dan password minimal delapan karakter.",
-      "authFailed": "Login gagal. Periksa akun owner atau gateway NatrocOS."
+      "authFailed": "Login gagal. Periksa akun lokal atau gateway NatrocOS."
     }
   },
   "dashboard": {
@@ -187,24 +187,82 @@
     "installing": "Mengantre",
     "emptyTitle": "Tidak ada hasil",
     "emptyCopy": "Ubah kata kunci pencarian atau reset filter.",
+    "queue": {
+      "title": "Antrean install",
+      "copy": "Job dibaca dari app-management melalui gateway dan disiapkan menjadi compose di /NatrocOS/apps.",
+      "empty": "Belum ada job install di antrean.",
+      "refresh": "Refresh antrean",
+      "process": "Proses antrean",
+      "processing": "Memproses",
+      "deployDryRun": "Simulasi deploy",
+      "deployingDryRun": "Menguji deploy",
+      "status": {
+        "queued": "antre",
+        "ready": "siap",
+        "failed": "gagal",
+        "deployed": "deployed"
+      }
+    },
     "errors": {
       "searchFailed": "Pencarian katalog gagal dijalankan.",
-      "installFailed": "Aplikasi gagal masuk antrean install."
+      "installFailed": "Aplikasi gagal masuk antrean install.",
+      "queueFailed": "Antrean install gagal dibaca.",
+      "processFailed": "Antrean install gagal diproses.",
+      "deployFailed": "Simulasi deploy gagal dijalankan."
     },
     "toasts": {
       "queued": {
         "title": "{app} masuk antrean",
-        "detail": "Permintaan install dikirim ke gateway."
+        "detail": "Job {job} ditulis ke antrean app-management."
+      },
+      "queueRefreshed": {
+        "title": "Antrean diperbarui",
+        "detail": "Daftar job install dibaca ulang dari app-management."
+      },
+      "queueProcessed": {
+        "title": "Antrean diproses",
+        "detail": "{processed} job diproses, {ready} siap, {failed} gagal."
+      },
+      "deployDryRun": {
+        "title": "Simulasi deploy siap",
+        "detail": "Job {job}: {command}"
       }
     }
   },
   "settings": {
     "profileEyebrow": "Profil lokal",
-    "profileCopy": "Akun owner, lokalisasi, dan preferensi shell dari sesi backend.",
+    "profileCopy": "Akun lokal, lokalisasi, dan preferensi shell dari sesi backend.",
     "security": "Keamanan",
     "passwordHash": "PBKDF2-SHA256",
+    "users": {
+      "title": "User lokal",
+      "copy": "Owner bisa membaca dan membuat user lokal dari gateway. Role ditentukan backend.",
+      "empty": "Belum ada user yang dikembalikan gateway.",
+      "refresh": "Refresh user",
+      "addTitle": "Tambah user",
+      "addCopy": "User baru selalu dibuat sebagai role user.",
+      "add": "Tambah user",
+      "displayName": "Nama tampilan",
+      "usernameHelp": "Minimal tiga karakter.",
+      "displayNameHelp": "Opsional; jika kosong memakai username.",
+      "errors": {
+        "invalidInput": "Username minimal tiga karakter dan password minimal delapan karakter."
+      }
+    },
+    "toasts": {
+      "usersRefreshed": {
+        "title": "User diperbarui",
+        "detail": "Daftar user dibaca ulang dari gateway."
+      },
+      "userCreated": {
+        "title": "{user} dibuat",
+        "detail": "Backend menetapkan role user untuk akun baru."
+      }
+    },
     "errors": {
-      "saveFailed": "Preferensi belum bisa disimpan."
+      "saveFailed": "Preferensi belum bisa disimpan.",
+      "usersFailed": "Daftar user gagal dibaca.",
+      "createUserFailed": "User baru gagal dibuat."
     }
   }
 }

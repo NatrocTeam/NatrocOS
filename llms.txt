@@ -15,7 +15,8 @@ services bound to localhost by default.
 - Active Go Web UI/front door: `apps/webui`
 - Active Go CLI: `apps/cli`
 - Active Go gateway: `apps/gateway`
-- Health-only Go service boundaries: `apps/app-management`, `services/user`, `services/storage`
+- Go app-management service: `apps/app-management`
+- Health-only Go service boundaries: `services/user`, `services/storage`
 - Active shared package: `packages/shared`
 - Default data root: `/NatrocOS`
 - Default Web UI URL: `http://127.0.0.1`
@@ -34,6 +35,12 @@ services bound to localhost by default.
 - `pnpm check` - run format, shared typecheck, web lint/build, and Go tests.
 - `pnpm preview:web` - preview the built web app.
 - `pnpm format:check` - check repository formatting with Prettier.
+- `go run ./apps/cli/cmd/natrocos -- store queue list` - list app-management
+  install queue jobs through the gateway.
+- `go run ./apps/cli/cmd/natrocos -- store queue process` - materialize queued
+  install jobs into compose artifacts.
+- `go run ./apps/cli/cmd/natrocos -- store queue deploy <job-id> --yes` -
+  execute a queued install job through app-management.
 
 ## Web App
 
@@ -91,15 +98,37 @@ Vite proxies `/api` and `/health` to `http://127.0.0.1:8080` unless
 ### Gateway API
 
 - Default bind address: `127.0.0.1:8080`; override with `NATROCOS_GATEWAY_ADDR`.
+- Default app-management upstream: `http://127.0.0.1:8081`; override with
+  `NATROCOS_APP_MANAGEMENT_INTERNAL_URL`.
 - Default data root: `/NatrocOS`; override with `NATROCOS_DATA_ROOT`.
 - Default store catalog: `/NatrocOS/store`; override with `NATROCOS_STORE_DIR`.
 - Auth metadata path: `/NatrocOS/metadata/user.db`.
-- Auth baseline: one owner, random access token, 24-hour session expiry,
-  PBKDF2-SHA256 password hash with random salt.
+- Auth baseline: `users[]` with the first account as `owner`, later accounts as
+  `user`, random access token, 24-hour session expiry, and PBKDF2-SHA256
+  password hash with random salt.
+- There is no `admin` role; `owner` includes full administrative capability.
+- User management baseline: `GET /api/users` and `POST /api/users` require an
+  owner session. Create-user requests do not accept a role; the backend assigns
+  `user` for every account after the first owner.
 - Docker apps are read from `docker ps -a`; start/stop/restart call the Docker
   CLI through the gateway.
-- Store install intentionally returns `501 Not Implemented` until the
-  app-management compose installer exists.
+- Gateway proxies `/api/app-management/*` to the internal app-management
+  service so clients can keep using one API front door.
+- Store install writes a persistent JSON job to
+  `/NatrocOS/app-management/install-queue`.
+- App-management can process queued install jobs into `/NatrocOS/apps/<app-id>`
+  with a `compose.yaml` and `metadata.json`.
+- App-management deploy supports dry-run by default and can run
+  `docker compose -f <compose.yaml> up -d` only when the internal request
+  includes `confirm: true`.
+- CLI exposes `natrocos store queue list/process/deploy`; deploy defaults to
+  dry-run and sends `confirm: true` only when `--yes` is passed.
+- Web Store UI also reads the install queue through the gateway and exposes
+  queue refresh, process queue, and dry-run deploy controls. It does not run a
+  confirmed Docker deploy from the UI.
+- Web Settings UI reads owner-only local users from `GET /api/users` and can
+  create a new local user with `POST /api/users`; the form does not send a
+  role field.
 - Storage mutation, disk format/mount, Samba, MergerFS, USB automount, and
   systemd installer behavior are not implemented yet.
 

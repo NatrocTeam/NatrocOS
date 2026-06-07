@@ -41,14 +41,14 @@
   },
   "login": {
     "loginTitle": "Enter the local control room",
-    "loginCopy": "Monitor server health, apps, storage, and admin sessions from one calm workspace.",
+    "loginCopy": "Monitor server health, apps, storage, and user sessions from one calm workspace.",
     "username": "Username",
-    "usernameHelp": "Use the local owner account.",
+    "usernameHelp": "Use the local NatrocOS account.",
     "password": "Password",
     "passwordHelp": "At least eight characters. First login creates the local owner.",
     "signIn": "Sign in",
     "signingIn": "Verifying",
-    "localOwner": "Local owner",
+    "localOwner": "Local account",
     "nodeAddress": "Local Web UI port 80",
     "highlights": {
       "dataRoot": "Data root",
@@ -58,7 +58,7 @@
     },
     "errors": {
       "invalidCredentials": "Enter a username and a password with at least eight characters.",
-      "authFailed": "Sign-in failed. Check the owner account or the NatrocOS gateway."
+      "authFailed": "Sign-in failed. Check the local account or the NatrocOS gateway."
     }
   },
   "dashboard": {
@@ -187,24 +187,82 @@
     "installing": "Queueing",
     "emptyTitle": "No results",
     "emptyCopy": "Change the search term or reset the filter.",
+    "queue": {
+      "title": "Install queue",
+      "copy": "Jobs are read from app-management through the gateway and prepared as compose projects in /NatrocOS/apps.",
+      "empty": "No install queue jobs yet.",
+      "refresh": "Refresh queue",
+      "process": "Process queue",
+      "processing": "Processing",
+      "deployDryRun": "Dry-run deploy",
+      "deployingDryRun": "Testing deploy",
+      "status": {
+        "queued": "queued",
+        "ready": "ready",
+        "failed": "failed",
+        "deployed": "deployed"
+      }
+    },
     "errors": {
       "searchFailed": "Catalog search failed.",
-      "installFailed": "The app could not be added to the install queue."
+      "installFailed": "The app could not be added to the install queue.",
+      "queueFailed": "The install queue could not be loaded.",
+      "processFailed": "The install queue could not be processed.",
+      "deployFailed": "The deploy dry-run could not be completed."
     },
     "toasts": {
       "queued": {
         "title": "{app} queued",
-        "detail": "The install request was sent to the gateway."
+        "detail": "Job {job} was written to the app-management queue."
+      },
+      "queueRefreshed": {
+        "title": "Queue refreshed",
+        "detail": "Install jobs were reloaded from app-management."
+      },
+      "queueProcessed": {
+        "title": "Queue processed",
+        "detail": "{processed} jobs processed, {ready} ready, {failed} failed."
+      },
+      "deployDryRun": {
+        "title": "Deploy dry-run ready",
+        "detail": "Job {job}: {command}"
       }
     }
   },
   "settings": {
     "profileEyebrow": "Local profile",
-    "profileCopy": "Owner account, localization, and shell preferences from the backend session.",
+    "profileCopy": "Local account, localization, and shell preferences from the backend session.",
     "security": "Security",
     "passwordHash": "PBKDF2-SHA256",
+    "users": {
+      "title": "Local users",
+      "copy": "Owners can read and create local users from the gateway. Roles are assigned by the backend.",
+      "empty": "No users were returned by the gateway.",
+      "refresh": "Refresh users",
+      "addTitle": "Add user",
+      "addCopy": "New accounts are always created with the user role.",
+      "add": "Add user",
+      "displayName": "Display name",
+      "usernameHelp": "At least three characters.",
+      "displayNameHelp": "Optional; falls back to username.",
+      "errors": {
+        "invalidInput": "Username must be at least three characters and password at least eight characters."
+      }
+    },
+    "toasts": {
+      "usersRefreshed": {
+        "title": "Users refreshed",
+        "detail": "The user list was reloaded from the gateway."
+      },
+      "userCreated": {
+        "title": "{user} created",
+        "detail": "The backend assigned the user role to the new account."
+      }
+    },
     "errors": {
-      "saveFailed": "Preferences cannot be saved yet."
+      "saveFailed": "Preferences cannot be saved yet.",
+      "usersFailed": "The user list could not be loaded.",
+      "createUserFailed": "The new user could not be created."
     }
   }
 }

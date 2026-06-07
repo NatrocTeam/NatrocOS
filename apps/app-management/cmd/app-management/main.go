@@ -4,17 +4,26 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
+	"time"
 
-	"natrocos/internal/servicekit"
+	"natrocos/apps/app-management/internal/server"
 )
 
 func main() {
-	err := servicekit.ListenAndServe(servicekit.Config{
-		ServiceName: "natrocos-app-management",
-		EnvAddr:     "NATROCOS_APP_MANAGEMENT_ADDR",
-		DefaultAddr: "127.0.0.1:8081",
-	})
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+	addr := os.Getenv("NATROCOS_APP_MANAGEMENT_ADDR")
+	if addr == "" {
+		addr = "127.0.0.1:8081"
+	}
+
+	httpServer := &http.Server{
+		Addr:              addr,
+		Handler:           server.New(server.Options{DataRoot: os.Getenv("NATROCOS_DATA_ROOT")}),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	log.Printf("natrocos-app-management listening on http://%s", addr)
+	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
 }

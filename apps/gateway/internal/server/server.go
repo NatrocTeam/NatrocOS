@@ -5,10 +5,15 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
 	"strings"
 
 	"natrocos/internal/natrocos"
 )
+
+const defaultAppManagementURL = "http://127.0.0.1:8081"
 
 type Provider interface {
 	AppAction(appID string, action string) (natrocos.AppActionResponse, error)
@@ -17,6 +22,7 @@ type Provider interface {
 	AuthLogout(token string) error
 	AuthRefresh(token string) (natrocos.RefreshSessionResponse, error)
 	CreateOwner(request natrocos.CreateOwnerRequest) (natrocos.UserSession, error)
+	CreateUser(token string, request natrocos.CreateUserRequest) (natrocos.UserAccount, error)
 	CurrentUser(token string) (natrocos.CurrentUser, error)
 	Health() natrocos.HealthResponse
 	SetupStatus() (natrocos.SetupStatus, error)
@@ -24,6 +30,7 @@ type Provider interface {
 	StoreApps() ([]natrocos.StoreApp, error)
 	StoreInstall(appID string) (natrocos.StoreInstallResponse, error)
 	SystemSummary() (natrocos.SystemSummary, error)
+	Users(token string) ([]natrocos.UserAccount, error)
 }
 
 var (
@@ -31,16 +38,27 @@ var (
 	ErrUnauthorized       = errors.New("unauthorized")
 	ErrNotFound           = errors.New("resource not found")
 	ErrConflict           = errors.New("resource conflict")
+	ErrForbidden          = errors.New("permission denied")
 	ErrValidation         = errors.New("validation failed")
 	ErrNotImplemented     = errors.New("not implemented")
 	ErrRuntimeUnavailable = errors.New("runtime unavailable")
 )
 
 func New() http.Handler {
-	return NewWithProvider(NewLiveProvider())
+	return NewWithProviderAndOptions(NewLiveProvider(), Options{
+		AppManagementURL: firstNonEmpty(os.Getenv("NATROCOS_APP_MANAGEMENT_INTERNAL_URL"), defaultAppManagementURL),
+	})
+}
+
+type Options struct {
+	AppManagementURL string
 }
 
 func NewWithProvider(provider Provider) http.Handler {
+	return NewWithProviderAndOptions(provider, Options{})
+}
+
+func NewWithProviderAndOptions(provider Provider, options Options) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(natrocos.RouteHealth, handleHealth(provider))
 	mux.HandleFunc(natrocos.RouteSystem, handleSystemSummary(provider))
@@ -53,8 +71,12 @@ func NewWithProvider(provider Provider) http.Handler {
 	mux.HandleFunc(natrocos.RouteAuthLogin, handleAuthLogin(provider))
 	mux.HandleFunc(natrocos.RouteAuthRefresh, handleAuthRefresh(provider))
 	mux.HandleFunc(natrocos.RouteAuthLogout, handleAuthLogout(provider))
+	mux.HandleFunc(natrocos.RouteUsers, handleUsers(provider))
 	mux.HandleFunc(natrocos.RouteCurrentUser, handleCurrentUser(provider))
 	mux.HandleFunc(natrocos.RouteStoragePools, handleStoragePools(provider))
+	if strings.TrimSpace(options.AppManagementURL) != "" {
+		mux.Handle("/api/app-management/", newServiceProxy(options.AppManagementURL))
+	}
 	return mux
 }
 
@@ -250,6 +272,37 @@ func handleCurrentUser(provider Provider) http.HandlerFunc {
 	}
 }
 
+func handleUsers(provider Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			payload, err := provider.Users(bearerToken(r))
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+
+			writeJSON(w, http.StatusOK, payload)
+		case http.MethodPost:
+			var request natrocos.CreateUserRequest
+			if !readRequestJSON(w, r, &request) {
+				return
+			}
+
+			payload, err := provider.CreateUser(bearerToken(r), request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+
+			writeJSON(w, http.StatusCreated, payload)
+		default:
+			w.Header().Set("Allow", "GET, POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
+}
+
 func handleStoragePools(provider Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !allowMethod(w, r, http.MethodGet) {
@@ -264,6 +317,25 @@ func handleStoragePools(provider Provider) http.HandlerFunc {
 
 		writeJSON(w, http.StatusOK, payload)
 	}
+}
+
+func newServiceProxy(targetURL string) http.Handler {
+	target, err := url.Parse(targetURL)
+	if err != nil || target.Scheme == "" || target.Host == "" {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"error": "invalid app-management upstream",
+			})
+		})
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error": "app-management upstream unavailable",
+		})
+	}
+	return proxy
 }
 
 func allowMethod(w http.ResponseWriter, r *http.Request, method string) bool {
@@ -307,6 +379,8 @@ func writeError(w http.ResponseWriter, err error) {
 		status = http.StatusNotFound
 	case errors.Is(err, ErrConflict):
 		status = http.StatusConflict
+	case errors.Is(err, ErrForbidden):
+		status = http.StatusForbidden
 	case errors.Is(err, ErrValidation):
 		status = http.StatusUnprocessableEntity
 	case errors.Is(err, ErrNotImplemented):

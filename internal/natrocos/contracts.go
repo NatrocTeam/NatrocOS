@@ -3,19 +3,40 @@ package natrocos
 const DataRoot = "/NatrocOS"
 
 const (
-	RouteHealth       = "/health"
-	RouteSystem       = "/api/system/summary"
-	RouteApps         = "/api/apps"
-	RouteAppAction    = "POST /api/apps/{id}/{action}"
-	RouteStore        = "/api/store"
-	RouteStoreInstall = "POST /api/store/{id}/install"
-	RouteSetupStatus  = "/api/setup/status"
-	RouteSetupOwner   = "POST /api/setup/owner"
-	RouteAuthLogin    = "POST /api/auth/login"
-	RouteAuthRefresh  = "POST /api/auth/refresh"
-	RouteAuthLogout   = "POST /api/auth/logout"
-	RouteCurrentUser  = "/api/users/me"
-	RouteStoragePools = "/api/storage/pools"
+	RoleOwner = "owner"
+	RoleUser  = "user"
+)
+
+const (
+	RouteHealth                    = "/health"
+	RouteSystem                    = "/api/system/summary"
+	RouteApps                      = "/api/apps"
+	RouteAppAction                 = "POST /api/apps/{id}/{action}"
+	RouteStore                     = "/api/store"
+	RouteStoreInstall              = "POST /api/store/{id}/install"
+	RouteSetupStatus               = "/api/setup/status"
+	RouteSetupOwner                = "POST /api/setup/owner"
+	RouteAuthLogin                 = "POST /api/auth/login"
+	RouteAuthRefresh               = "POST /api/auth/refresh"
+	RouteAuthLogout                = "POST /api/auth/logout"
+	RouteUsers                     = "/api/users"
+	RouteCurrentUser               = "/api/users/me"
+	RouteStoragePools              = "/api/storage/pools"
+	RouteAppManagementInstallQueue = "/api/app-management/install-queue"
+	RouteAppManagementProcessQueue = "POST /api/app-management/install-queue/process"
+	RouteAppManagementDeployJob    = "POST /api/app-management/install-queue/{id}/deploy"
+)
+
+const (
+	AppInstallQueueRelativePath   = "app-management/install-queue"
+	AppInstallQueueFilePermission = 0o600
+)
+
+const (
+	StoreInstallJobQueued   = "queued"
+	StoreInstallJobReady    = "ready"
+	StoreInstallJobFailed   = "failed"
+	StoreInstallJobDeployed = "deployed"
 )
 
 type HealthResponse struct {
@@ -88,8 +109,49 @@ type StoreInstallRequest struct {
 }
 
 type StoreInstallResponse struct {
-	AppID  string `json:"appId"`
-	Status string `json:"status"`
+	AppID    string `json:"appId"`
+	JobID    string `json:"jobId"`
+	QueuedAt string `json:"queuedAt"`
+	Status   string `json:"status"`
+}
+
+type StoreInstallJob struct {
+	JobID       string           `json:"jobId"`
+	App         StoreApp         `json:"app"`
+	Status      string           `json:"status"`
+	QueuedAt    string           `json:"queuedAt"`
+	StartedAt   string           `json:"startedAt,omitempty"`
+	CompletedAt string           `json:"completedAt,omitempty"`
+	Error       string           `json:"error,omitempty"`
+	Plan        StoreInstallPlan `json:"plan"`
+}
+
+type StoreInstallPlan struct {
+	DataPath    string   `json:"dataPath"`
+	ComposePath string   `json:"composePath"`
+	Image       string   `json:"image"`
+	ServiceName string   `json:"serviceName"`
+	Tags        []string `json:"tags"`
+}
+
+type StoreInstallQueueProcessResponse struct {
+	Processed int               `json:"processed"`
+	Ready     int               `json:"ready"`
+	Failed    int               `json:"failed"`
+	Jobs      []StoreInstallJob `json:"jobs"`
+}
+
+type StoreInstallDeployRequest struct {
+	DryRun  bool `json:"dryRun"`
+	Pull    bool `json:"pull"`
+	Confirm bool `json:"confirm"`
+}
+
+type StoreInstallDeployResponse struct {
+	Job     StoreInstallJob `json:"job"`
+	DryRun  bool            `json:"dryRun"`
+	Command []string        `json:"command"`
+	Output  string          `json:"output,omitempty"`
 }
 
 type SetupStatus struct {
@@ -103,9 +165,23 @@ type CreateOwnerRequest struct {
 	DisplayName string `json:"displayName"`
 }
 
+type CreateUserRequest struct {
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	DisplayName string `json:"displayName"`
+}
+
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+type UserAccount struct {
+	UserID      string `json:"userId"`
+	Username    string `json:"username"`
+	DisplayName string `json:"displayName"`
+	Role        string `json:"role"`
+	CreatedAt   string `json:"createdAt,omitempty"`
 }
 
 type UserSession struct {
