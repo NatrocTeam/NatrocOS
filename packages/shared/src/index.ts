@@ -1,6 +1,7 @@
 export const NATROCOS_DATA_ROOT = "/NatrocOS" as const;
 
 export const API_ROUTES = {
+  services: "/api/services",
   systemSummary: "/api/system/summary",
   apps: "/api/apps",
   appAction: "/api/apps/:id/:action",
@@ -58,6 +59,12 @@ export type AppInstanceDto = {
   updatedAt: string;
 };
 
+export type ServiceStatusDto = {
+  name: string;
+  status: string;
+  detail?: string;
+};
+
 export type StoreAppDto = {
   id: StoreAppId;
   name: string;
@@ -74,6 +81,31 @@ export type StoragePoolDto = {
   mountPath: string;
   used: string;
   total: string;
+};
+
+export type StorageDiskDto = {
+  id: string;
+  name: string;
+  path: string;
+  parent?: string;
+  type: string;
+  size: number;
+  filesystem?: string;
+  label?: string;
+  model?: string;
+  serial?: string;
+  mountpoints: string[];
+  removable: boolean;
+};
+
+export type StorageMountDto = {
+  id: string;
+  source: string;
+  target: string;
+  filesystem: string;
+  options: string[];
+  used?: string;
+  total?: string;
 };
 
 export type SystemSummaryDto = {

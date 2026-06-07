@@ -7,6 +7,7 @@ import {
   RefreshCw,
   Server,
   ShieldCheck,
+  TriangleAlert,
 } from "lucide-react";
 
 import {
@@ -25,6 +26,7 @@ import type {
   DashboardAction,
   Language,
   MetricKey,
+  ServiceStatusDto,
   StoragePoolDto,
   SystemMetricDto,
 } from "@/types/natrocos";
@@ -44,6 +46,7 @@ export function DashboardView({
   nodeName,
   onDashboardAction,
   onRefresh,
+  serviceStatuses,
   storagePools,
   uptime,
 }: {
@@ -54,6 +57,7 @@ export function DashboardView({
   nodeName: string;
   onDashboardAction: (action: DashboardAction) => void;
   onRefresh: () => void;
+  serviceStatuses: ServiceStatusDto[];
   storagePools: StoragePoolDto[];
   uptime: string;
 }) {
@@ -221,7 +225,7 @@ export function DashboardView({
       />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.72fr_1.28fr]">
-        <LiveStreamPanel apps={apps} language={language} />
+        <ServiceStreamPanel language={language} services={serviceStatuses} />
         <AppsPanel apps={apps.slice(0, 3)} language={language} />
       </div>
     </div>
@@ -289,34 +293,15 @@ function QuickActionsPanel({
   );
 }
 
-function LiveStreamPanel({
-  apps,
+function ServiceStreamPanel({
   language,
+  services,
 }: {
-  apps: AppInstance[];
   language: Language;
+  services: ServiceStatusDto[];
 }) {
   const t = dictionary[language];
-  const events = [
-    {
-      icon: ShieldCheck,
-      title: t.dashboard.authReady,
-      detail: t.dashboard.authDetail,
-    },
-    {
-      icon: HardDrive,
-      title: t.dashboard.storageScanned,
-      detail: t.dashboard.storageScannedDetail,
-    },
-    {
-      icon: Power,
-      title: t.dashboard.containerCheck,
-      detail: t.dashboard.containerCheckDetail.replace(
-        "{count}",
-        String(apps.length),
-      ),
-    },
-  ];
+  const statusLabels: Record<string, string> = t.settings.services.status;
 
   return (
     <Surface>
@@ -328,28 +313,50 @@ function LiveStreamPanel({
           <Activity size={18} strokeWidth={1.5} />
         </div>
         <div className="mt-6 space-y-3">
-          {events.map((event, index) => (
-            <motion.div
-              key={event.title}
-              animate={{ y: [0, index === 1 ? -2 : 2, 0] }}
-              transition={{
-                duration: 3.2 + index,
-                repeat: Infinity,
-                repeatType: "mirror",
-              }}
-              className="flex items-start gap-3 rounded-lg bg-[#eef0e9] p-3 ring-1 ring-[#20241f]/6 dark:bg-white/5 dark:ring-white/8"
-            >
-              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white ring-1 ring-[#20241f]/8 dark:bg-[#151813] dark:ring-white/10">
-                <event.icon size={17} strokeWidth={1.5} />
-              </span>
-              <div>
-                <p className="text-sm font-medium">{event.title}</p>
-                <p className="mt-1 text-xs text-[#6d7368] dark:text-[#aeb5a6]">
-                  {event.detail}
-                </p>
-              </div>
-            </motion.div>
-          ))}
+          {services.length === 0 ? (
+            <p className="rounded-lg bg-[#eef0e9] p-3 text-sm text-[#6d7368] ring-1 ring-[#20241f]/6 dark:bg-white/5 dark:text-[#aeb5a6] dark:ring-white/8">
+              {t.settings.services.empty}
+            </p>
+          ) : (
+            services.map((service, index) => {
+              const isOk = service.status === "ok";
+              const Icon = isOk ? ShieldCheck : TriangleAlert;
+
+              return (
+                <motion.div
+                  key={service.name}
+                  animate={{ y: [0, index % 2 === 0 ? 1.5 : -1.5, 0] }}
+                  transition={{
+                    duration: 3.2 + index,
+                    repeat: Infinity,
+                    repeatType: "mirror",
+                  }}
+                  className="flex min-w-0 items-start gap-3 rounded-lg bg-[#eef0e9] p-3 ring-1 ring-[#20241f]/6 dark:bg-white/5 dark:ring-white/8"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white ring-1 ring-[#20241f]/8 dark:bg-[#151813] dark:ring-white/10">
+                    <Icon
+                      className={
+                        isOk
+                          ? "text-[#2f7d59]"
+                          : "text-[#a4643b] dark:text-[#e6a069]"
+                      }
+                      size={17}
+                      strokeWidth={1.5}
+                    />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {service.name}
+                    </p>
+                    <p className="mt-1 truncate text-xs text-[#6d7368] dark:text-[#aeb5a6]">
+                      {statusLabels[service.status] ?? service.status}
+                      {service.detail ? ` - ${service.detail}` : ""}
+                    </p>
+                  </div>
+                </motion.div>
+              );
+            })
+          )}
         </div>
       </div>
     </Surface>

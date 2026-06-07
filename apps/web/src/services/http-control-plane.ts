@@ -6,7 +6,10 @@ import type {
   AppInstance,
   CurrentUserDto,
   RefreshSessionResponseDto,
+  ServiceStatusDto,
   SetupStatusDto,
+  StorageDiskDto,
+  StorageMountDto,
   StoreApp,
   StoreInstallDeployResponseDto,
   StoreInstallJobDto,
@@ -91,9 +94,33 @@ export function createHttpControlPlaneClient(
       );
     },
 
+    async listServices() {
+      return readJSON<ServiceStatusDto[]>(
+        await fetch(endpoint(API_ROUTES.services), {
+          headers: headers(),
+        }),
+      );
+    },
+
     async listStoreApps() {
       return readJSON<StoreApp[]>(
         await fetch(endpoint(API_ROUTES.store), {
+          headers: headers(),
+        }),
+      );
+    },
+
+    async listStorageDisks() {
+      return readJSON<StorageDiskDto[]>(
+        await fetch(endpoint(API_ROUTES.storageDisks), {
+          headers: headers(),
+        }),
+      );
+    },
+
+    async listStorageMounts() {
+      return readJSON<StorageMountDto[]>(
+        await fetch(endpoint(API_ROUTES.storageMounts), {
           headers: headers(),
         }),
       );

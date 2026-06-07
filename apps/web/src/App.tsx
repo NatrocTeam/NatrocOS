@@ -8,6 +8,7 @@ import { AppsView } from "@/components/views/apps-view";
 import { DashboardView } from "@/components/views/dashboard-view";
 import { LoginScreen } from "@/components/views/login-screen";
 import { SettingsView } from "@/components/views/settings-view";
+import { StorageView } from "@/components/views/storage-view";
 import { StoreView } from "@/components/views/store-view";
 import { quickActions } from "@/data/ui";
 import { dictionary } from "@/i18n/dictionary";
@@ -21,6 +22,9 @@ import type {
   CreateUserRequestDto,
   LoginRequestDto,
   PendingAppAction,
+  ServiceStatusDto,
+  StorageDiskDto,
+  StorageMountDto,
   StoragePoolDto,
   StoreApp,
   StoreAppId,
@@ -93,8 +97,13 @@ function App() {
   const [apps, setApps] = useState<AppInstance[]>([]);
   const [storeCatalog, setStoreCatalog] = useState<StoreApp[]>([]);
   const [storeQueue, setStoreQueue] = useState<StoreInstallJobDto[]>([]);
+  const [serviceStatuses, setServiceStatuses] = useState<ServiceStatusDto[]>(
+    [],
+  );
   const [users, setUsers] = useState<UserAccountDto[]>([]);
   const [metrics, setMetrics] = useState<SystemMetricDto[]>([]);
+  const [storageDisks, setStorageDisks] = useState<StorageDiskDto[]>([]);
+  const [storageMounts, setStorageMounts] = useState<StorageMountDto[]>([]);
   const [storagePools, setStoragePools] = useState<StoragePoolDto[]>([]);
   const [nodeName, setNodeName] = useState("");
   const [uptime, setUptime] = useState("");
@@ -106,6 +115,7 @@ function App() {
     useState<StoreAppId | null>(null);
   const [isStoreQueueRefreshing, setIsStoreQueueRefreshing] = useState(false);
   const [isProcessingStoreQueue, setIsProcessingStoreQueue] = useState(false);
+  const [isStorageRefreshing, setIsStorageRefreshing] = useState(false);
   const [isUsersRefreshing, setIsUsersRefreshing] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
   const [deployingStoreJobId, setDeployingStoreJobId] = useState<string | null>(
@@ -137,9 +147,10 @@ function App() {
     let isActive = true;
     void (async () => {
       try {
-        const [summary, catalog] = await Promise.all([
+        const [summary, catalog, services] = await Promise.all([
           controlPlaneClient.getSystemSummary(),
           controlPlaneClient.listStoreApps(),
+          controlPlaneClient.listServices().catch(() => []),
         ]);
 
         if (!isActive) return;
@@ -148,6 +159,7 @@ function App() {
         setNodeName(summary.nodeName);
         setStoragePools(summary.storagePools);
         setStoreCatalog(catalog);
+        setServiceStatuses(services);
         setUptime(summary.uptime);
 
         try {
@@ -171,6 +183,22 @@ function App() {
             if (isActive) {
               setUsers([]);
             }
+          }
+        }
+
+        try {
+          const [disks, mounts] = await Promise.all([
+            controlPlaneClient.listStorageDisks(),
+            controlPlaneClient.listStorageMounts(),
+          ]);
+          if (isActive) {
+            setStorageDisks(disks);
+            setStorageMounts(mounts);
+          }
+        } catch {
+          if (isActive) {
+            setStorageDisks([]);
+            setStorageMounts([]);
           }
         }
       } finally {
@@ -256,7 +284,10 @@ function App() {
       setMetrics([]);
       setStoreCatalog([]);
       setStoreQueue([]);
+      setServiceStatuses([]);
       setUsers([]);
+      setStorageDisks([]);
+      setStorageMounts([]);
       setStoragePools([]);
       setView("dashboard");
     }
@@ -295,14 +326,18 @@ function App() {
     setIsRefreshing(true);
 
     try {
-      const [summary, catalog, queue, accounts] = await Promise.all([
-        controlPlaneClient.getSystemSummary(),
-        controlPlaneClient.listStoreApps(),
-        controlPlaneClient.listStoreQueue().catch(() => null),
-        session?.role === "owner"
-          ? controlPlaneClient.listUsers().catch(() => null)
-          : Promise.resolve(null),
-      ]);
+      const [summary, catalog, services, queue, accounts, disks, mounts] =
+        await Promise.all([
+          controlPlaneClient.getSystemSummary(),
+          controlPlaneClient.listStoreApps(),
+          controlPlaneClient.listServices().catch(() => null),
+          controlPlaneClient.listStoreQueue().catch(() => null),
+          session?.role === "owner"
+            ? controlPlaneClient.listUsers().catch(() => null)
+            : Promise.resolve(null),
+          controlPlaneClient.listStorageDisks().catch(() => null),
+          controlPlaneClient.listStorageMounts().catch(() => null),
+        ]);
 
       setApps(summary.apps);
       setMetrics(summary.metrics);
@@ -310,11 +345,20 @@ function App() {
       setStoragePools(summary.storagePools);
       setStoreCatalog(catalog);
       setUptime(summary.uptime);
+      if (services) {
+        setServiceStatuses(services);
+      }
       if (queue) {
         setStoreQueue(queue);
       }
       if (accounts) {
         setUsers(accounts);
+      }
+      if (disks) {
+        setStorageDisks(disks);
+      }
+      if (mounts) {
+        setStorageMounts(mounts);
       }
 
       if (showToast) {
@@ -331,6 +375,40 @@ function App() {
       });
     } finally {
       setIsRefreshing(false);
+    }
+  }
+
+  async function refreshStorageInventory({ showToast = true } = {}) {
+    if (isStorageRefreshing) return;
+
+    setIsStorageRefreshing(true);
+
+    try {
+      const [summary, disks, mounts] = await Promise.all([
+        controlPlaneClient.getSystemSummary(),
+        controlPlaneClient.listStorageDisks(),
+        controlPlaneClient.listStorageMounts(),
+      ]);
+
+      setMetrics(summary.metrics);
+      setStoragePools(summary.storagePools);
+      setStorageDisks(disks);
+      setStorageMounts(mounts);
+
+      if (showToast) {
+        pushToast({
+          title: dictionary[language].storage.toasts.refreshed.title,
+          detail: dictionary[language].storage.toasts.refreshed.detail,
+        });
+      }
+    } catch {
+      pushToast({
+        title: dictionary[language].storage.errors.refreshFailed,
+        detail: dictionary[language].common.tryAgain,
+        tone: "warning",
+      });
+    } finally {
+      setIsStorageRefreshing(false);
     }
   }
 
@@ -557,6 +635,12 @@ function App() {
       setView("store");
     }
 
+    if (action === "scanStorage") {
+      setView("storage");
+      void refreshStorageInventory({ showToast: true });
+      return;
+    }
+
     pushToast({
       title: toastCopy.title,
       detail: toastCopy.detail,
@@ -627,6 +711,7 @@ function App() {
                   nodeName={nodeName}
                   onDashboardAction={runDashboardAction}
                   onRefresh={() => refreshBackendData()}
+                  serviceStatuses={serviceStatuses}
                   storagePools={storagePools}
                   uptime={uptime}
                 />
@@ -637,6 +722,16 @@ function App() {
                   pendingAction={pendingAppAction}
                   language={language}
                   onAppAction={runBackendAppAction}
+                />
+              )}
+              {view === "storage" && (
+                <StorageView
+                  disks={storageDisks}
+                  isRefreshing={isStorageRefreshing}
+                  language={language}
+                  mounts={storageMounts}
+                  pools={storagePools}
+                  onRefresh={() => refreshStorageInventory()}
                 />
               )}
               {view === "store" && (
@@ -662,6 +757,7 @@ function App() {
                   isUsersRefreshing={isUsersRefreshing}
                   language={language}
                   nodeName={nodeName}
+                  serviceStatuses={serviceStatuses}
                   session={session}
                   setLanguage={setLanguage}
                   theme={theme}

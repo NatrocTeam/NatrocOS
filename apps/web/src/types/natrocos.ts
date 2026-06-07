@@ -21,7 +21,10 @@ export type {
   LoginRequestDto,
   MetricKey,
   RefreshSessionResponseDto,
+  ServiceStatusDto,
   SetupStatusDto,
+  StorageDiskDto,
+  StorageMountDto,
   StoragePoolDto,
   StoreAppDto,
   StoreAppId,
@@ -41,7 +44,7 @@ export type {
 } from "@natrocos/shared";
 
 export type Theme = "light" | "dark";
-export type View = "dashboard" | "apps" | "store" | "settings";
+export type View = "dashboard" | "apps" | "storage" | "store" | "settings";
 export type DashboardAction =
   | "scanStorage"
   | "checkBackups"

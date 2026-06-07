@@ -9,11 +9,16 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"natrocos/internal/natrocos"
 )
 
-const defaultAppManagementURL = "http://127.0.0.1:8081"
+const (
+	defaultAppManagementURL = "http://127.0.0.1:8081"
+	defaultUserURL          = "http://127.0.0.1:8082"
+	defaultStorageURL       = "http://127.0.0.1:8083"
+)
 
 type Provider interface {
 	AppAction(appID string, action string) (natrocos.AppActionResponse, error)
@@ -47,11 +52,15 @@ var (
 func New() http.Handler {
 	return NewWithProviderAndOptions(NewLiveProvider(), Options{
 		AppManagementURL: firstNonEmpty(os.Getenv("NATROCOS_APP_MANAGEMENT_INTERNAL_URL"), defaultAppManagementURL),
+		UserURL:          firstNonEmpty(os.Getenv("NATROCOS_USER_INTERNAL_URL"), defaultUserURL),
+		StorageURL:       firstNonEmpty(os.Getenv("NATROCOS_STORAGE_INTERNAL_URL"), defaultStorageURL),
 	})
 }
 
 type Options struct {
 	AppManagementURL string
+	StorageURL       string
+	UserURL          string
 }
 
 func NewWithProvider(provider Provider) http.Handler {
@@ -61,6 +70,7 @@ func NewWithProvider(provider Provider) http.Handler {
 func NewWithProviderAndOptions(provider Provider, options Options) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(natrocos.RouteHealth, handleHealth(provider))
+	mux.HandleFunc(natrocos.RouteServices, handleServiceStatuses(provider, options))
 	mux.HandleFunc(natrocos.RouteSystem, handleSystemSummary(provider))
 	mux.HandleFunc(natrocos.RouteApps, handleApps(provider))
 	mux.HandleFunc(natrocos.RouteAppAction, handleAppAction(provider))
@@ -74,8 +84,11 @@ func NewWithProviderAndOptions(provider Provider, options Options) http.Handler 
 	mux.HandleFunc(natrocos.RouteUsers, handleUsers(provider))
 	mux.HandleFunc(natrocos.RouteCurrentUser, handleCurrentUser(provider))
 	mux.HandleFunc(natrocos.RouteStoragePools, handleStoragePools(provider))
+	if strings.TrimSpace(options.StorageURL) != "" {
+		mux.Handle("/api/storage/", newServiceProxy(options.StorageURL, "storage"))
+	}
 	if strings.TrimSpace(options.AppManagementURL) != "" {
-		mux.Handle("/api/app-management/", newServiceProxy(options.AppManagementURL))
+		mux.Handle("/api/app-management/", newServiceProxy(options.AppManagementURL, "app-management"))
 	}
 	return mux
 }
@@ -87,6 +100,16 @@ func handleHealth(provider Provider) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, provider.Health())
+	}
+}
+
+func handleServiceStatuses(provider Provider, options Options) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !allowMethod(w, r, http.MethodGet) {
+			return
+		}
+
+		writeJSON(w, http.StatusOK, serviceStatuses(provider, options))
 	}
 }
 
@@ -103,6 +126,91 @@ func handleSystemSummary(provider Provider) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, payload)
+	}
+}
+
+func serviceStatuses(provider Provider, options Options) []natrocos.ServiceStatus {
+	gatewayHealth := provider.Health()
+	statuses := []natrocos.ServiceStatus{
+		{
+			Name:   "gateway",
+			Status: firstNonEmpty(gatewayHealth.Status, "ok"),
+			Detail: strings.TrimSpace(firstNonEmpty(
+				gatewayHealth.DataRoot,
+				"internal API gateway",
+			)),
+		},
+	}
+
+	probes := []struct {
+		name      string
+		targetURL string
+	}{
+		{name: "app-management", targetURL: options.AppManagementURL},
+		{name: "user", targetURL: options.UserURL},
+		{name: "storage", targetURL: options.StorageURL},
+	}
+
+	client := &http.Client{Timeout: 900 * time.Millisecond}
+	for _, probe := range probes {
+		statuses = append(statuses, probeServiceHealth(client, probe.name, probe.targetURL))
+	}
+
+	return statuses
+}
+
+func probeServiceHealth(client *http.Client, name string, targetURL string) natrocos.ServiceStatus {
+	target, err := url.Parse(strings.TrimSpace(targetURL))
+	if err != nil || target.Scheme == "" || target.Host == "" {
+		return natrocos.ServiceStatus{
+			Name:   name,
+			Status: "misconfigured",
+			Detail: "invalid upstream",
+		}
+	}
+
+	target.Path = strings.TrimRight(target.Path, "/") + natrocos.RouteHealth
+	target.RawQuery = ""
+	request, err := http.NewRequest(http.MethodGet, target.String(), nil)
+	if err != nil {
+		return natrocos.ServiceStatus{
+			Name:   name,
+			Status: "misconfigured",
+			Detail: err.Error(),
+		}
+	}
+
+	response, err := client.Do(request)
+	if err != nil {
+		return natrocos.ServiceStatus{
+			Name:   name,
+			Status: "unavailable",
+			Detail: compactDetail(err.Error()),
+		}
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return natrocos.ServiceStatus{
+			Name:   name,
+			Status: "unavailable",
+			Detail: response.Status,
+		}
+	}
+
+	var health natrocos.HealthResponse
+	if err := json.NewDecoder(response.Body).Decode(&health); err != nil {
+		return natrocos.ServiceStatus{
+			Name:   name,
+			Status: "ok",
+			Detail: response.Status,
+		}
+	}
+
+	return natrocos.ServiceStatus{
+		Name:   firstNonEmpty(strings.TrimPrefix(health.Service, "natrocos-"), name),
+		Status: firstNonEmpty(health.Status, "ok"),
+		Detail: firstNonEmpty(health.DataRoot, response.Status),
 	}
 }
 
@@ -319,12 +427,12 @@ func handleStoragePools(provider Provider) http.HandlerFunc {
 	}
 }
 
-func newServiceProxy(targetURL string) http.Handler {
+func newServiceProxy(targetURL string, service string) http.Handler {
 	target, err := url.Parse(targetURL)
 	if err != nil || target.Scheme == "" || target.Host == "" {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadGateway, map[string]string{
-				"error": "invalid app-management upstream",
+				"error": "invalid " + service + " upstream",
 			})
 		})
 	}
@@ -332,7 +440,7 @@ func newServiceProxy(targetURL string) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error": "app-management upstream unavailable",
+			"error": service + " upstream unavailable",
 		})
 	}
 	return proxy
@@ -400,4 +508,12 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		log.Printf("write json response: %v", err)
 	}
+}
+
+func compactDetail(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 140 {
+		return value
+	}
+	return value[:137] + "..."
 }

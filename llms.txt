@@ -16,7 +16,8 @@ services bound to localhost by default.
 - Active Go CLI: `apps/cli`
 - Active Go gateway: `apps/gateway`
 - Go app-management service: `apps/app-management`
-- Health-only Go service boundaries: `services/user`, `services/storage`
+- Go storage service: `services/storage`
+- Go user/session service: `services/user`
 - Active shared package: `packages/shared`
 - Default data root: `/NatrocOS`
 - Default Web UI URL: `http://127.0.0.1`
@@ -35,12 +36,29 @@ services bound to localhost by default.
 - `pnpm check` - run format, shared typecheck, web lint/build, and Go tests.
 - `pnpm preview:web` - preview the built web app.
 - `pnpm format:check` - check repository formatting with Prettier.
+- `go run ./apps/cli/cmd/natrocos -- auth login --username <name> --password-stdin` -
+  login through the gateway and store a local CLI session token.
+- `go run ./apps/cli/cmd/natrocos -- auth whoami` - show the active backend
+  session user.
+- `go run ./apps/cli/cmd/natrocos -- health services` - list gateway,
+  app-management, user, and storage health from `GET /api/services`.
+- `go run ./apps/cli/cmd/natrocos -- service list` - list the same service
+  health entries through the service command namespace.
+- `go run ./apps/cli/cmd/natrocos -- service status storage` - show one
+  service health entry by name.
+- `go run ./apps/cli/cmd/natrocos -- user list` - list local users as owner.
+- `go run ./apps/cli/cmd/natrocos -- user add --username <name> --password-stdin` -
+  create a local user as owner; the backend assigns the `user` role.
 - `go run ./apps/cli/cmd/natrocos -- store queue list` - list app-management
   install queue jobs through the gateway.
 - `go run ./apps/cli/cmd/natrocos -- store queue process` - materialize queued
   install jobs into compose artifacts.
 - `go run ./apps/cli/cmd/natrocos -- store queue deploy <job-id> --yes` -
   execute a queued install job through app-management.
+- `go run ./apps/cli/cmd/natrocos -- storage disk list` - list disks from the
+  storage service through the gateway.
+- `go run ./apps/cli/cmd/natrocos -- storage mount list` - list mounts from the
+  storage service through the gateway.
 
 ## Web App
 
@@ -49,7 +67,10 @@ Motion for React, and lucide-react icons. It implements these views:
 
 - Login and first-owner setup through the gateway API.
 - Dashboard backed by `GET /api/system/summary`.
+- Dashboard service-health panel backed by `GET /api/services`.
 - Apps backed by Docker data from the gateway.
+- Storage backed by storage-service disk and mount endpoints through the
+  gateway.
 - App Store backed by JSON catalog files from `/NatrocOS/store`.
 - Settings backed by the active backend session and system summary.
 
@@ -69,6 +90,7 @@ Vite proxies `/api` and `/health` to `http://127.0.0.1:8080` unless
 - [`apps/web/src/components/views/login-screen.tsx`](apps/web/src/components/views/login-screen.tsx) - login and first-owner UI.
 - [`apps/web/src/components/views/dashboard-view.tsx`](apps/web/src/components/views/dashboard-view.tsx) - dashboard screen.
 - [`apps/web/src/components/views/apps-view.tsx`](apps/web/src/components/views/apps-view.tsx) - apps screen.
+- [`apps/web/src/components/views/storage-view.tsx`](apps/web/src/components/views/storage-view.tsx) - storage disk and mount screen.
 - [`apps/web/src/components/views/store-view.tsx`](apps/web/src/components/views/store-view.tsx) - app store screen.
 - [`apps/web/src/components/views/settings-view.tsx`](apps/web/src/components/views/settings-view.tsx) - settings screen.
 - [`apps/web/src/i18n/dictionary.ts`](apps/web/src/i18n/dictionary.ts) - locale loader.
@@ -80,11 +102,14 @@ Vite proxies `/api` and `/health` to `http://127.0.0.1:8080` unless
 - [`apps/webui/internal/server/server.go`](apps/webui/internal/server/server.go) - static SPA handler and reverse proxy to the internal API.
 - [`apps/gateway/cmd/gateway/main.go`](apps/gateway/cmd/gateway/main.go) - internal gateway entrypoint, default `127.0.0.1:8080`.
 - [`apps/gateway/internal/server/server.go`](apps/gateway/internal/server/server.go) - gateway routes and error mapping.
-- [`apps/gateway/internal/server/live_provider.go`](apps/gateway/internal/server/live_provider.go) - live provider for Docker, `/proc`, `df`, store catalog, and file-backed auth.
+- [`apps/gateway/internal/server/live_provider.go`](apps/gateway/internal/server/live_provider.go) - live provider for Docker, `/proc`, `df`, store catalog, and userstore-backed auth.
 - [`apps/cli/cmd/natrocos/main.go`](apps/cli/cmd/natrocos/main.go) - NatrocOS CLI entrypoint.
 - [`internal/cli/cli.go`](internal/cli/cli.go) - CLI parser, API client, and command handlers.
 - [`internal/natrocos/contracts.go`](internal/natrocos/contracts.go) - Go data root, route constants, and DTOs.
+- [`internal/userstore/store.go`](internal/userstore/store.go) - file-backed local user/session store shared by gateway and user service.
 - [`internal/servicekit/health.go`](internal/servicekit/health.go) - shared health endpoint for service boundaries.
+- [`services/user/cmd/user/main.go`](services/user/cmd/user/main.go) - user/session service entrypoint, default `127.0.0.1:8082`.
+- [`services/user/internal/server/server.go`](services/user/internal/server/server.go) - user service HTTP routes for setup, auth, and users.
 
 ## Runtime
 
@@ -100,16 +125,37 @@ Vite proxies `/api` and `/health` to `http://127.0.0.1:8080` unless
 - Default bind address: `127.0.0.1:8080`; override with `NATROCOS_GATEWAY_ADDR`.
 - Default app-management upstream: `http://127.0.0.1:8081`; override with
   `NATROCOS_APP_MANAGEMENT_INTERNAL_URL`.
+- Default user-service health upstream: `http://127.0.0.1:8082`; override with
+  `NATROCOS_USER_INTERNAL_URL`.
+- Default storage upstream: `http://127.0.0.1:8083`; override with
+  `NATROCOS_STORAGE_INTERNAL_URL`.
 - Default data root: `/NatrocOS`; override with `NATROCOS_DATA_ROOT`.
 - Default store catalog: `/NatrocOS/store`; override with `NATROCOS_STORE_DIR`.
 - Auth metadata path: `/NatrocOS/metadata/user.db`.
-- Auth baseline: `users[]` with the first account as `owner`, later accounts as
-  `user`, random access token, 24-hour session expiry, and PBKDF2-SHA256
-  password hash with random salt.
+- Auth baseline: shared `internal/userstore` JSON storage with `users[]`, the
+  first account as `owner`, later accounts as `user`, random access token,
+  24-hour session expiry, and PBKDF2-SHA256 password hash with random salt.
 - There is no `admin` role; `owner` includes full administrative capability.
 - User management baseline: `GET /api/users` and `POST /api/users` require an
   owner session. Create-user requests do not accept a role; the backend assigns
   `user` for every account after the first owner.
+- User service baseline: `services/user` serves `GET /health`,
+  `GET /api/setup/status`, `POST /api/setup/owner`, auth login/refresh/logout,
+  `GET /api/users`, `POST /api/users`, and `GET /api/users/me` on
+  `127.0.0.1:8082` by default with `NATROCOS_USER_ADDR` override.
+- Gateway keeps the same auth/user routes for frontend and CLI compatibility
+  while delegating the file-backed account logic to `internal/userstore`.
+- Gateway service-status baseline: `GET /api/services` returns live statuses
+  for gateway, app-management, user, and storage by probing loopback `/health`
+  endpoints. Downstream failures are represented as `unavailable` or
+  `misconfigured`; they do not crash the gateway response.
+- CLI auth baseline: `auth login` stores a local session token beside the CLI
+  config path, `auth whoami` and `auth logout` use that session, and automation
+  can pass `--token` or `NATROCOS_TOKEN`.
+- CLI user baseline: `user list`, `user show`, and `user add` call the live
+  gateway API with an owner token. `user add` does not send or accept a role.
+- CLI service baseline: `service list` and `service status <name>` call
+  `GET /api/services`; restart/enable/disable remain planned.
 - Docker apps are read from `docker ps -a`; start/stop/restart call the Docker
   CLI through the gateway.
 - Gateway proxies `/api/app-management/*` to the internal app-management
@@ -129,6 +175,13 @@ Vite proxies `/api` and `/health` to `http://127.0.0.1:8080` unless
 - Web Settings UI reads owner-only local users from `GET /api/users` and can
   create a new local user with `POST /api/users`; the form does not send a
   role field.
+- Web Settings UI also reads `GET /api/services` and displays internal service
+  health from the gateway.
+- Storage read-only baseline: `services/storage` serves `GET /api/storage/disks`
+  from `lsblk --json --bytes`, `GET /api/storage/mounts` from `/proc/mounts`
+  plus `df -kP`, and `GET /api/storage/pools`. Gateway proxies disk/mount
+  routes to the internal storage service at `http://127.0.0.1:8083` by default
+  with `NATROCOS_STORAGE_INTERNAL_URL` override.
 - Storage mutation, disk format/mount, Samba, MergerFS, USB automount, and
   systemd installer behavior are not implemented yet.
 
@@ -142,6 +195,7 @@ components. Locale namespaces are organized by product area:
 - `login`
 - `dashboard`
 - `apps`
+- `storage`
 - `store`
 - `settings`
 

@@ -36,6 +36,7 @@
   "navigation": {
     "dashboard": "Dasbor",
     "apps": "Aplikasi",
+    "storage": "Storage",
     "store": "Katalog App",
     "settings": "Pengaturan"
   },
@@ -70,7 +71,7 @@
     "storageUsed": "Terpakai",
     "liveApps": "Aplikasi aktif",
     "liveAppsOnNode": "aplikasi aktif",
-    "eventStream": "Alur event",
+    "eventStream": "Kesehatan service",
     "runtimeFocus": "Fokus runtime",
     "authReady": "Auth backend aktif",
     "authDetail": "session token dari gateway",
@@ -229,11 +230,45 @@
       }
     }
   },
+  "storage": {
+    "eyebrow": "Storage lokal",
+    "copy": "Disk, mount, dan pool dibaca dari storage service melalui gateway tanpa melakukan perubahan filesystem.",
+    "refresh": "Refresh storage",
+    "disks": "Disk terdeteksi",
+    "mounted": "Disk mounted",
+    "diskInventory": "Inventori disk",
+    "mounts": "Mount aktif",
+    "emptyDisks": "Belum ada disk yang dikembalikan storage service.",
+    "emptyMounts": "Belum ada mount yang dikembalikan storage service.",
+    "mountpoints": "Mountpoint",
+    "model": "Model / label",
+    "options": "Opsi",
+    "mountId": "Mount ID",
+    "toasts": {
+      "refreshed": {
+        "title": "Storage diperbarui",
+        "detail": "Disk, mount, dan pool dibaca ulang dari gateway."
+      }
+    },
+    "errors": {
+      "refreshFailed": "Storage gagal dibaca ulang."
+    }
+  },
   "settings": {
     "profileEyebrow": "Profil lokal",
     "profileCopy": "Akun lokal, lokalisasi, dan preferensi shell dari sesi backend.",
     "security": "Keamanan",
     "passwordHash": "PBKDF2-SHA256",
+    "services": {
+      "title": "Service internal",
+      "copy": "Gateway memeriksa endpoint health loopback untuk app-management, user, dan storage.",
+      "empty": "Tidak ada status service yang dikembalikan gateway.",
+      "status": {
+        "ok": "ok",
+        "unavailable": "tidak tersedia",
+        "misconfigured": "salah konfigurasi"
+      }
+    },
     "users": {
       "title": "User lokal",
       "copy": "Owner bisa membaca dan membuat user lokal dari gateway. Role ditentukan backend.",

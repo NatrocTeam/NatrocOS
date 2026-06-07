@@ -52,6 +52,7 @@ type globals struct {
 	Profile string
 	Quiet   bool
 	Timeout time.Duration
+	Token   string
 	Verbose bool
 }
 
@@ -85,6 +86,27 @@ type setupOwnerOptions struct {
 	DisplayName   string
 	PasswordStdin bool
 	Username      string
+}
+
+type authLoginOptions struct {
+	PasswordStdin bool
+	Username      string
+}
+
+type userAddOptions struct {
+	DisplayName   string
+	PasswordStdin bool
+	Username      string
+}
+
+type cliSession struct {
+	APIURL      string `json:"apiUrl"`
+	AccessToken string `json:"accessToken"`
+	ExpiresAt   string `json:"expiresAt"`
+	UserID      string `json:"userId"`
+	Username    string `json:"username"`
+	DisplayName string `json:"displayName"`
+	Role        string `json:"role"`
 }
 
 func Execute(ctx context.Context, args []string, options Options) int {
@@ -181,12 +203,18 @@ func (r runner) execute(ctx context.Context, args []string) int {
 		return r.runHealth(ctx, global, client, commandArgs[1:])
 	case "setup":
 		return r.runSetup(ctx, global, client, commandArgs[1:])
+	case "auth":
+		return r.runAuth(ctx, global, client, commandArgs[1:])
+	case "user":
+		return r.runUser(ctx, global, client, commandArgs[1:])
 	case "app":
 		return r.runApp(ctx, global, client, commandArgs[1:])
 	case "store":
 		return r.runStore(ctx, global, client, commandArgs[1:])
 	case "storage":
 		return r.runStorage(ctx, global, client, commandArgs[1:])
+	case "service":
+		return r.runService(ctx, global, client, commandArgs[1:])
 	case "api":
 		return r.runAPI(ctx, global, client, commandArgs[1:])
 	default:
@@ -279,6 +307,7 @@ func (r runner) runStatus(ctx context.Context, global globals, client apiClient)
 func (r runner) runDoctor(ctx context.Context, global globals, client apiClient) int {
 	checks := []doctorCheck{
 		r.checkEndpoint(ctx, client, "gateway health", natrocos.RouteHealth),
+		r.checkEndpoint(ctx, client, "service status", natrocos.RouteServices),
 		r.checkEndpoint(ctx, client, "system summary", natrocos.RouteSystem),
 		r.checkEndpoint(ctx, client, "apps api", natrocos.RouteApps),
 		r.checkEndpoint(ctx, client, "storage pools api", natrocos.RouteStoragePools),
@@ -312,14 +341,14 @@ func (r runner) runHealth(ctx context.Context, global globals, client apiClient,
 
 	switch args[0] {
 	case "services":
-		var health natrocos.HealthResponse
-		if exit := r.getJSON(ctx, client, natrocos.RouteHealth, &health); exit != ExitSuccess {
+		services, exit := r.fetchServices(ctx, client)
+		if exit != ExitSuccess {
 			return exit
 		}
 		if global.JSON {
-			return r.writeJSON(health)
+			return r.writeJSON(services)
 		}
-		r.printf("%s: %s\n", health.Service, health.Status)
+		r.printServiceStatuses(services)
 		return ExitSuccess
 	case "ports", "logs":
 		return r.notImplemented("health " + args[0] + " is planned but not implemented yet")
@@ -357,12 +386,10 @@ func (r runner) runSetup(ctx context.Context, global globals, client apiClient, 
 			return ExitInvalidUsage
 		}
 
-		passwordBytes, err := io.ReadAll(r.stdin)
-		if err != nil {
-			r.errorf("read password from stdin: %v\n", err)
-			return ExitGenericError
+		password, exit := r.readPasswordFromStdin()
+		if exit != ExitSuccess {
+			return exit
 		}
-		password := strings.TrimRight(string(passwordBytes), "\r\n")
 
 		request := natrocos.CreateOwnerRequest{
 			Username:    setupOptions.Username,
@@ -386,6 +413,185 @@ func (r runner) runSetup(ctx context.Context, global globals, client apiClient, 
 		return ExitSuccess
 	default:
 		r.errorf("unknown setup command %q\n", args[0])
+		return ExitInvalidUsage
+	}
+}
+
+func (r runner) runAuth(ctx context.Context, global globals, client apiClient, args []string) int {
+	if len(args) == 0 {
+		r.errorf("usage: natrocos auth <login|logout|whoami>\n")
+		return ExitInvalidUsage
+	}
+
+	switch args[0] {
+	case "login":
+		options, err := parseAuthLoginOptions(args[1:])
+		if err != nil {
+			r.errorf("%v\n", err)
+			return ExitInvalidUsage
+		}
+		if options.Username == "" || !options.PasswordStdin {
+			r.errorf("usage: natrocos auth login --username <name> --password-stdin\n")
+			return ExitInvalidUsage
+		}
+
+		password, exit := r.readPasswordFromStdin()
+		if exit != ExitSuccess {
+			return exit
+		}
+
+		body, err := json.Marshal(natrocos.LoginRequest{
+			Username: options.Username,
+			Password: password,
+		})
+		if err != nil {
+			r.errorf("%v\n", err)
+			return ExitGenericError
+		}
+
+		var session natrocos.UserSession
+		if exit := r.postJSON(ctx, client, "/api/auth/login", string(body), &session); exit != ExitSuccess {
+			return exit
+		}
+
+		storedSession := cliSessionFromUserSession(normalizeAPIURL(global.APIURL), session)
+		if exit := r.writeSession(global, storedSession); exit != ExitSuccess {
+			return exit
+		}
+
+		if global.JSON {
+			return r.writeJSON(storedSession)
+		}
+		r.printf("logged in: %s\nrole: %s\nexpires: %s\n", session.Username, session.Role, session.ExpiresAt)
+		return ExitSuccess
+	case "logout":
+		token, exit := r.sessionToken(global)
+		if exit != ExitSuccess {
+			return exit
+		}
+
+		if exit := r.postJSONWithToken(ctx, client, "/api/auth/logout", "", token, &json.RawMessage{}); exit != ExitSuccess {
+			return exit
+		}
+		if exit := r.deleteSession(global); exit != ExitSuccess {
+			return exit
+		}
+
+		if global.JSON {
+			return r.writeJSON(map[string]bool{"loggedOut": true})
+		}
+		r.printf("logged out\n")
+		return ExitSuccess
+	case "whoami":
+		token, exit := r.sessionToken(global)
+		if exit != ExitSuccess {
+			return exit
+		}
+
+		var current natrocos.CurrentUser
+		if exit := r.getJSONWithToken(ctx, client, natrocos.RouteCurrentUser, token, &current); exit != ExitSuccess {
+			return exit
+		}
+
+		if global.JSON {
+			return r.writeJSON(current)
+		}
+		r.printf("user: %s\nrole: %s\n", firstNonEmpty(current.DisplayName, current.Username), current.Role)
+		return ExitSuccess
+	default:
+		r.errorf("unknown auth command %q\n", args[0])
+		return ExitInvalidUsage
+	}
+}
+
+func (r runner) runUser(ctx context.Context, global globals, client apiClient, args []string) int {
+	if len(args) == 0 {
+		r.errorf("usage: natrocos user <list|show|add>\n")
+		return ExitInvalidUsage
+	}
+
+	switch args[0] {
+	case "list":
+		users, exit := r.fetchUsers(ctx, global, client)
+		if exit != ExitSuccess {
+			return exit
+		}
+		if global.JSON {
+			return r.writeJSON(users)
+		}
+		if len(users) == 0 {
+			r.printf("No users were returned by the gateway.\n")
+			return ExitSuccess
+		}
+		for _, user := range users {
+			r.printf("%-16s %-8s %s\n", user.Username, user.Role, firstNonEmpty(user.DisplayName, user.UserID))
+		}
+		return ExitSuccess
+	case "show":
+		if len(args) < 2 {
+			r.errorf("usage: natrocos user show <username|user-id>\n")
+			return ExitInvalidUsage
+		}
+		users, exit := r.fetchUsers(ctx, global, client)
+		if exit != ExitSuccess {
+			return exit
+		}
+		for _, user := range users {
+			if user.Username == args[1] || user.UserID == args[1] {
+				if global.JSON {
+					return r.writeJSON(user)
+				}
+				r.printf("id: %s\nusername: %s\ndisplay-name: %s\nrole: %s\ncreated: %s\n",
+					user.UserID, user.Username, user.DisplayName, user.Role, user.CreatedAt)
+				return ExitSuccess
+			}
+		}
+		r.errorf("user %q not found\n", args[1])
+		return ExitNotFound
+	case "add":
+		options, err := parseUserAddOptions(args[1:])
+		if err != nil {
+			r.errorf("%v\n", err)
+			return ExitInvalidUsage
+		}
+		if options.Username == "" || !options.PasswordStdin {
+			r.errorf("usage: natrocos user add --username <name> [--display-name <name>] --password-stdin\n")
+			return ExitInvalidUsage
+		}
+
+		password, exit := r.readPasswordFromStdin()
+		if exit != ExitSuccess {
+			return exit
+		}
+		token, exit := r.sessionToken(global)
+		if exit != ExitSuccess {
+			return exit
+		}
+
+		body, err := json.Marshal(natrocos.CreateUserRequest{
+			Username:    options.Username,
+			Password:    password,
+			DisplayName: options.DisplayName,
+		})
+		if err != nil {
+			r.errorf("%v\n", err)
+			return ExitGenericError
+		}
+
+		var account natrocos.UserAccount
+		if exit := r.postJSONWithToken(ctx, client, natrocos.RouteUsers, string(body), token, &account); exit != ExitSuccess {
+			return exit
+		}
+
+		if global.JSON {
+			return r.writeJSON(account)
+		}
+		r.printf("created: %s\nrole: %s\n", account.Username, account.Role)
+		return ExitSuccess
+	case "update", "password", "sessions", "revoke-session", "disable", "enable":
+		return r.notImplemented("user " + args[0] + " is planned but not implemented yet")
+	default:
+		r.errorf("unknown user command %q\n", args[0])
 		return ExitInvalidUsage
 	}
 }
@@ -538,10 +744,53 @@ func (r runner) runStorage(ctx context.Context, global globals, client apiClient
 			return r.runStoragePools(ctx, global, client, false)
 		}
 		return r.notImplemented("storage pool mutation is planned but not implemented yet")
-	case "disk", "mount", "share":
-		return r.notImplemented("storage " + args[0] + " is planned but not implemented yet")
+	case "disk":
+		return r.runStorageDisk(ctx, global, client, args[1:])
+	case "mount":
+		return r.runStorageMount(ctx, global, client, args[1:])
+	case "share":
+		return r.notImplemented("storage share is planned but not implemented yet")
 	default:
 		r.errorf("unknown storage command %q\n", args[0])
+		return ExitInvalidUsage
+	}
+}
+
+func (r runner) runService(ctx context.Context, global globals, client apiClient, args []string) int {
+	if len(args) == 0 {
+		r.errorf("usage: natrocos service <list|status>\n")
+		return ExitInvalidUsage
+	}
+
+	switch args[0] {
+	case "list":
+		services, exit := r.fetchServices(ctx, client)
+		if exit != ExitSuccess {
+			return exit
+		}
+		if global.JSON {
+			return r.writeJSON(services)
+		}
+		r.printServiceStatuses(services)
+		return ExitSuccess
+	case "status":
+		if len(args) < 2 {
+			r.errorf("usage: natrocos service status <service-name>\n")
+			return ExitInvalidUsage
+		}
+		service, exit := r.findService(ctx, client, args[1])
+		if exit != ExitSuccess {
+			return exit
+		}
+		if global.JSON {
+			return r.writeJSON(service)
+		}
+		r.printf("name: %s\nstatus: %s\ndetail: %s\n", service.Name, service.Status, service.Detail)
+		return ExitSuccess
+	case "restart", "enable", "disable":
+		return r.notImplemented("service " + args[0] + " is planned but not implemented yet")
+	default:
+		r.errorf("unknown service command %q\n", args[0])
 		return ExitInvalidUsage
 	}
 }
@@ -738,6 +987,96 @@ func (r runner) runStoragePools(ctx context.Context, global globals, client apiC
 	return ExitSuccess
 }
 
+func (r runner) runStorageDisk(ctx context.Context, global globals, client apiClient, args []string) int {
+	if len(args) == 0 {
+		r.errorf("usage: natrocos storage disk <list|show>\n")
+		return ExitInvalidUsage
+	}
+
+	switch args[0] {
+	case "list":
+		disks, exit := r.fetchStorageDisks(ctx, client)
+		if exit != ExitSuccess {
+			return exit
+		}
+		if global.JSON {
+			return r.writeJSON(disks)
+		}
+		if len(disks) == 0 {
+			r.printf("No storage disks were returned by the gateway.\n")
+			return ExitSuccess
+		}
+		for _, disk := range disks {
+			r.printf("%-18s %-8s size=%d path=%s mounts=%s\n",
+				disk.Name, disk.Type, disk.Size, disk.Path, strings.Join(disk.Mountpoints, ","))
+		}
+		return ExitSuccess
+	case "show":
+		if len(args) < 2 {
+			r.errorf("usage: natrocos storage disk show <disk-id>\n")
+			return ExitInvalidUsage
+		}
+		disk, exit := r.findStorageDisk(ctx, client, args[1])
+		if exit != ExitSuccess {
+			return exit
+		}
+		if global.JSON {
+			return r.writeJSON(disk)
+		}
+		r.printf("id: %s\nname: %s\npath: %s\ntype: %s\nsize: %d\nfilesystem: %s\nlabel: %s\nmodel: %s\nserial: %s\nmounts: %s\nremovable: %t\n",
+			disk.ID, disk.Name, disk.Path, disk.Type, disk.Size, disk.Filesystem, disk.Label, disk.Model, disk.Serial, strings.Join(disk.Mountpoints, ", "), disk.Removable)
+		return ExitSuccess
+	default:
+		r.errorf("unknown storage disk command %q\n", args[0])
+		return ExitInvalidUsage
+	}
+}
+
+func (r runner) runStorageMount(ctx context.Context, global globals, client apiClient, args []string) int {
+	if len(args) == 0 {
+		r.errorf("usage: natrocos storage mount <list|show>\n")
+		return ExitInvalidUsage
+	}
+
+	switch args[0] {
+	case "list":
+		mounts, exit := r.fetchStorageMounts(ctx, client)
+		if exit != ExitSuccess {
+			return exit
+		}
+		if global.JSON {
+			return r.writeJSON(mounts)
+		}
+		if len(mounts) == 0 {
+			r.printf("No storage mounts were returned by the gateway.\n")
+			return ExitSuccess
+		}
+		for _, mount := range mounts {
+			r.printf("%-28s %-8s source=%s used=%s total=%s\n",
+				mount.Target, mount.Filesystem, mount.Source, mount.Used, mount.Total)
+		}
+		return ExitSuccess
+	case "show":
+		if len(args) < 2 {
+			r.errorf("usage: natrocos storage mount show <mount-id>\n")
+			return ExitInvalidUsage
+		}
+		mount, exit := r.findStorageMount(ctx, client, args[1])
+		if exit != ExitSuccess {
+			return exit
+		}
+		if global.JSON {
+			return r.writeJSON(mount)
+		}
+		r.printf("id: %s\nsource: %s\ntarget: %s\nfilesystem: %s\noptions: %s\nused: %s\ntotal: %s\n",
+			mount.ID, mount.Source, mount.Target, mount.Filesystem, strings.Join(mount.Options, ", "), mount.Used, mount.Total)
+		return ExitSuccess
+	default:
+		r.errorf("unknown storage mount command %q\n", args[0])
+		return ExitInvalidUsage
+	}
+}
+
 func (r runner) fetchApps(ctx context.Context, client apiClient) ([]natrocos.AppInstance, int) {
 	var apps []natrocos.AppInstance
 	if exit := r.getJSON(ctx, client, natrocos.RouteApps, &apps); exit != ExitSuccess {
@@ -758,6 +1097,88 @@ func (r runner) findApp(ctx context.Context, client apiClient, appID string) (na
 	}
 	r.errorf("app %q not found\n", appID)
 	return natrocos.AppInstance{}, ExitNotFound
+}
+
+func (r runner) fetchServices(ctx context.Context, client apiClient) ([]natrocos.ServiceStatus, int) {
+	var services []natrocos.ServiceStatus
+	if exit := r.getJSON(ctx, client, natrocos.RouteServices, &services); exit != ExitSuccess {
+		return nil, exit
+	}
+	return services, ExitSuccess
+}
+
+func (r runner) findService(ctx context.Context, client apiClient, serviceName string) (natrocos.ServiceStatus, int) {
+	services, exit := r.fetchServices(ctx, client)
+	if exit != ExitSuccess {
+		return natrocos.ServiceStatus{}, exit
+	}
+
+	normalizedName := normalizeServiceName(serviceName)
+	for _, service := range services {
+		if normalizeServiceName(service.Name) == normalizedName {
+			return service, ExitSuccess
+		}
+	}
+
+	r.errorf("service %q not found\n", serviceName)
+	return natrocos.ServiceStatus{}, ExitNotFound
+}
+
+func (r runner) fetchUsers(ctx context.Context, global globals, client apiClient) ([]natrocos.UserAccount, int) {
+	token, exit := r.sessionToken(global)
+	if exit != ExitSuccess {
+		return nil, exit
+	}
+
+	var users []natrocos.UserAccount
+	if exit := r.getJSONWithToken(ctx, client, natrocos.RouteUsers, token, &users); exit != ExitSuccess {
+		return nil, exit
+	}
+	return users, ExitSuccess
+}
+
+func (r runner) fetchStorageDisks(ctx context.Context, client apiClient) ([]natrocos.StorageDisk, int) {
+	var disks []natrocos.StorageDisk
+	if exit := r.getJSON(ctx, client, natrocos.RouteStorageDisks, &disks); exit != ExitSuccess {
+		return nil, exit
+	}
+	return disks, ExitSuccess
+}
+
+func (r runner) findStorageDisk(ctx context.Context, client apiClient, diskID string) (natrocos.StorageDisk, int) {
+	disks, exit := r.fetchStorageDisks(ctx, client)
+	if exit != ExitSuccess {
+		return natrocos.StorageDisk{}, exit
+	}
+	for _, disk := range disks {
+		if disk.ID == diskID || disk.Name == diskID || disk.Path == diskID {
+			return disk, ExitSuccess
+		}
+	}
+	r.errorf("storage disk %q not found\n", diskID)
+	return natrocos.StorageDisk{}, ExitNotFound
+}
+
+func (r runner) fetchStorageMounts(ctx context.Context, client apiClient) ([]natrocos.StorageMount, int) {
+	var mounts []natrocos.StorageMount
+	if exit := r.getJSON(ctx, client, natrocos.RouteStorageMounts, &mounts); exit != ExitSuccess {
+		return nil, exit
+	}
+	return mounts, ExitSuccess
+}
+
+func (r runner) findStorageMount(ctx context.Context, client apiClient, mountID string) (natrocos.StorageMount, int) {
+	mounts, exit := r.fetchStorageMounts(ctx, client)
+	if exit != ExitSuccess {
+		return natrocos.StorageMount{}, exit
+	}
+	for _, mount := range mounts {
+		if mount.ID == mountID || mount.Target == mountID {
+			return mount, ExitSuccess
+		}
+	}
+	r.errorf("storage mount %q not found\n", mountID)
+	return natrocos.StorageMount{}, ExitNotFound
 }
 
 func (r runner) fetchStoreApps(ctx context.Context, client apiClient) ([]natrocos.StoreApp, int) {
@@ -790,9 +1211,21 @@ func (r runner) postJSON(ctx context.Context, client apiClient, path string, bod
 	return r.doJSON(ctx, client, http.MethodPost, path, body, out)
 }
 
+func (r runner) getJSONWithToken(ctx context.Context, client apiClient, path string, token string, out any) int {
+	return r.doJSONWithToken(ctx, client, http.MethodGet, path, "", token, out)
+}
+
+func (r runner) postJSONWithToken(ctx context.Context, client apiClient, path string, body string, token string, out any) int {
+	return r.doJSONWithToken(ctx, client, http.MethodPost, path, body, token, out)
+}
+
 func (r runner) doJSON(ctx context.Context, client apiClient, method string, path string, body string, out any) int {
+	return r.doJSONWithToken(ctx, client, method, path, body, "", out)
+}
+
+func (r runner) doJSONWithToken(ctx context.Context, client apiClient, method string, path string, body string, token string, out any) int {
 	var payload json.RawMessage
-	if exit := r.doRaw(ctx, client, method, path, body, &payload); exit != ExitSuccess {
+	if exit := r.doRawWithToken(ctx, client, method, path, body, token, &payload); exit != ExitSuccess {
 		return exit
 	}
 
@@ -807,6 +1240,10 @@ func (r runner) doJSON(ctx context.Context, client apiClient, method string, pat
 }
 
 func (r runner) doRaw(ctx context.Context, client apiClient, method string, path string, body string, out *json.RawMessage) int {
+	return r.doRawWithToken(ctx, client, method, path, body, "", out)
+}
+
+func (r runner) doRawWithToken(ctx context.Context, client apiClient, method string, path string, body string, token string, out *json.RawMessage) int {
 	requestURL := client.baseURL + ensureLeadingSlash(path)
 	var reader io.Reader
 	if body != "" {
@@ -820,6 +1257,9 @@ func (r runner) doRaw(ctx context.Context, client apiClient, method string, path
 	}
 	if body != "" {
 		request.Header.Set("Content-Type", "application/json")
+	}
+	if strings.TrimSpace(token) != "" {
+		request.Header.Set("Authorization", "Bearer "+strings.TrimSpace(token))
 	}
 
 	response, err := client.httpClient.Do(request)
@@ -880,6 +1320,12 @@ func (r runner) printHelp(args []string) {
 		r.printf(storageHelp)
 	case "health":
 		r.printf(healthHelp)
+	case "service":
+		r.printf(serviceHelp)
+	case "auth":
+		r.printf(authHelp)
+	case "user":
+		r.printf(userHelp)
 	default:
 		r.printf("Usage: natrocos %s\n\nRun `natrocos --help` for the full command tree.\n", path)
 	}
@@ -892,6 +1338,82 @@ func (r runner) printRootHelp() {
 func (r runner) notImplemented(message string) int {
 	r.errorf("%s\n", message)
 	return ExitGenericError
+}
+
+func (r runner) printServiceStatuses(services []natrocos.ServiceStatus) {
+	if len(services) == 0 {
+		r.printf("No service statuses were returned by the gateway.\n")
+		return
+	}
+	for _, service := range services {
+		detail := ""
+		if strings.TrimSpace(service.Detail) != "" {
+			detail = " - " + service.Detail
+		}
+		r.printf("%-16s %s%s\n", service.Name, service.Status, detail)
+	}
+}
+
+func (r runner) readPasswordFromStdin() (string, int) {
+	passwordBytes, err := io.ReadAll(r.stdin)
+	if err != nil {
+		r.errorf("read password from stdin: %v\n", err)
+		return "", ExitGenericError
+	}
+	return strings.TrimRight(string(passwordBytes), "\r\n"), ExitSuccess
+}
+
+func (r runner) sessionToken(global globals) (string, int) {
+	if strings.TrimSpace(global.Token) != "" {
+		return strings.TrimSpace(global.Token), ExitSuccess
+	}
+
+	session, err := readSession(global)
+	if err != nil {
+		r.errorf("not logged in: run `natrocos auth login --username <name> --password-stdin` or pass --token\n")
+		return "", ExitAuthentication
+	}
+	if strings.TrimSpace(session.AccessToken) == "" {
+		r.errorf("not logged in: session has no token\n")
+		return "", ExitAuthentication
+	}
+	return session.AccessToken, ExitSuccess
+}
+
+func (r runner) writeSession(global globals, session cliSession) int {
+	path := sessionFilePath(global)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		r.errorf("create CLI config directory: %v\n", err)
+		return ExitGenericError
+	}
+
+	content, err := json.MarshalIndent(session, "", "  ")
+	if err != nil {
+		r.errorf("%v\n", err)
+		return ExitGenericError
+	}
+
+	tempPath := path + ".tmp"
+	if err := os.WriteFile(tempPath, content, 0o600); err != nil {
+		r.errorf("write CLI session: %v\n", err)
+		return ExitGenericError
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		r.errorf("save CLI session: %v\n", err)
+		return ExitGenericError
+	}
+	return ExitSuccess
+}
+
+func (r runner) deleteSession(global globals) int {
+	if strings.TrimSpace(global.Token) != "" {
+		return ExitSuccess
+	}
+	if err := os.Remove(sessionFilePath(global)); err != nil && !os.IsNotExist(err) {
+		r.errorf("delete CLI session: %v\n", err)
+		return ExitGenericError
+	}
+	return ExitSuccess
 }
 
 func (r runner) writeJSON(payload any) int {
@@ -917,6 +1439,7 @@ func parseGlobals(args []string) (globals, []string, error) {
 		APIURL:  firstNonEmpty(os.Getenv("NATROCOS_API_URL"), defaultAPIURL),
 		Config:  firstNonEmpty(os.Getenv("NATROCOS_CONFIG"), defaultConfigPath()),
 		Profile: firstNonEmpty(os.Getenv("NATROCOS_PROFILE"), "default"),
+		Token:   firstNonEmpty(os.Getenv("NATROCOS_TOKEN"), os.Getenv("NATROCOS_ACCESS_TOKEN")),
 	}
 
 	commandArgs := make([]string, 0, len(args))
@@ -935,7 +1458,7 @@ func parseGlobals(args []string) (globals, []string, error) {
 		case arg == "--verbose":
 			global.Verbose = true
 		case arg == "--no-color":
-		case arg == "-u" || arg == "--api-url" || arg == "--config" || arg == "--profile" || arg == "--timeout":
+		case arg == "-u" || arg == "--api-url" || arg == "--config" || arg == "--profile" || arg == "--timeout" || arg == "--token":
 			if index+1 >= len(args) {
 				return global, nil, fmt.Errorf("%s requires a value", arg)
 			}
@@ -957,6 +1480,10 @@ func parseGlobals(args []string) (globals, []string, error) {
 			}
 		case strings.HasPrefix(arg, "--timeout="):
 			if err := applyGlobalValue(&global, "--timeout", strings.TrimPrefix(arg, "--timeout=")); err != nil {
+				return global, nil, err
+			}
+		case strings.HasPrefix(arg, "--token="):
+			if err := applyGlobalValue(&global, "--token", strings.TrimPrefix(arg, "--token=")); err != nil {
 				return global, nil, err
 			}
 		default:
@@ -981,6 +1508,8 @@ func applyGlobalValue(global *globals, flag string, value string) error {
 			return fmt.Errorf("invalid timeout %q", value)
 		}
 		global.Timeout = duration
+	case "--token":
+		global.Token = strings.TrimSpace(value)
 	default:
 		return fmt.Errorf("unknown global flag %q", flag)
 	}
@@ -1058,7 +1587,69 @@ func parseSetupOwnerOptions(args []string) (setupOwnerOptions, error) {
 	return options, nil
 }
 
+func parseAuthLoginOptions(args []string) (authLoginOptions, error) {
+	options := authLoginOptions{}
+
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		switch {
+		case arg == "--username":
+			if index+1 >= len(args) {
+				return options, fmt.Errorf("%s requires a value", arg)
+			}
+			index++
+			options.Username = args[index]
+		case strings.HasPrefix(arg, "--username="):
+			options.Username = strings.TrimPrefix(arg, "--username=")
+		case arg == "--password-stdin":
+			options.PasswordStdin = true
+		default:
+			return options, fmt.Errorf("unknown auth login option %q", arg)
+		}
+	}
+
+	options.Username = strings.TrimSpace(options.Username)
+	return options, nil
+}
+
+func parseUserAddOptions(args []string) (userAddOptions, error) {
+	options := userAddOptions{}
+
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		switch {
+		case arg == "--username" || arg == "--display-name":
+			if index+1 >= len(args) {
+				return options, fmt.Errorf("%s requires a value", arg)
+			}
+			index++
+			applyUserAddValue(&options, arg, args[index])
+		case strings.HasPrefix(arg, "--username="):
+			applyUserAddValue(&options, "--username", strings.TrimPrefix(arg, "--username="))
+		case strings.HasPrefix(arg, "--display-name="):
+			applyUserAddValue(&options, "--display-name", strings.TrimPrefix(arg, "--display-name="))
+		case arg == "--password-stdin":
+			options.PasswordStdin = true
+		default:
+			return options, fmt.Errorf("unknown user add option %q", arg)
+		}
+	}
+
+	options.Username = strings.TrimSpace(options.Username)
+	options.DisplayName = strings.TrimSpace(options.DisplayName)
+	return options, nil
+}
+
 func applySetupOwnerValue(options *setupOwnerOptions, flag string, value string) {
+	switch flag {
+	case "--username":
+		options.Username = value
+	case "--display-name":
+		options.DisplayName = value
+	}
+}
+
+func applyUserAddValue(options *userAddOptions, flag string, value string) {
 	switch flag {
 	case "--username":
 		options.Username = value
@@ -1102,6 +1693,45 @@ func defaultConfigPath() string {
 	return filepath.Join(home, defaultConfigRelativePath)
 }
 
+func sessionFilePath(global globals) string {
+	configPath := strings.TrimSpace(global.Config)
+	if configPath == "" {
+		configPath = defaultConfigPath()
+	}
+	return filepath.Join(filepath.Dir(configPath), "session.json")
+}
+
+func readSession(global globals) (cliSession, error) {
+	content, err := os.ReadFile(sessionFilePath(global))
+	if err != nil {
+		return cliSession{}, err
+	}
+
+	var session cliSession
+	if err := json.Unmarshal(content, &session); err != nil {
+		return cliSession{}, err
+	}
+	return session, nil
+}
+
+func cliSessionFromUserSession(apiURL string, session natrocos.UserSession) cliSession {
+	return cliSession{
+		APIURL:      apiURL,
+		AccessToken: session.AccessToken,
+		ExpiresAt:   session.ExpiresAt,
+		UserID:      session.UserID,
+		Username:    session.Username,
+		DisplayName: session.DisplayName,
+		Role:        session.Role,
+	}
+}
+
+func normalizeServiceName(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.TrimPrefix(value, "natrocos-")
+	return value
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value != "" {
@@ -1137,6 +1767,7 @@ Global flags:
   -u, --api-url <url>      Gateway API URL, default http://127.0.0.1:8080
       --config <path>      CLI config path
       --profile <name>     CLI connection profile
+      --token <token>      Access token override for automation
       --json               Output JSON where supported
       --quiet              Reduce output
       --verbose            Increase diagnostic output
@@ -1149,9 +1780,14 @@ Commands:
   config <command>         Inspect CLI config
   status                   Show gateway system summary
   doctor                   Run read-only API diagnostics
-  health services          Check gateway health endpoint
+  health services          List gateway and internal service health
   setup status             Show first-owner setup status
   setup owner              Create the first owner from stdin password
+  auth login               Login and store a local CLI session
+  auth whoami              Show the active session user
+  auth logout              Revoke the active token and remove local session
+  user list                List local users as owner
+  user add                 Create a local user as owner
   app list                 List managed apps
   app show <app-id>        Show one managed app
   app start <app-id>       Start an app through gateway
@@ -1165,6 +1801,10 @@ Commands:
   store queue deploy <id>  Dry-run or deploy a queued install
   storage summary          Show storage pool summary
   storage pool list        List storage pools
+  storage disk list        List detected disks
+  storage mount list       List mounted filesystems
+  service list             List NatrocOS service health
+  service status <name>    Show one NatrocOS service health entry
   api get <path>           Debug API GET
   api post <path>          Debug API POST
 
@@ -1198,6 +1838,10 @@ Planned:
 const storageHelp = `Usage:
   natrocos storage summary [--json]
   natrocos storage pool list [--json]
+  natrocos storage disk list [--json]
+  natrocos storage disk show <disk-id> [--json]
+  natrocos storage mount list [--json]
+  natrocos storage mount show <mount-id> [--json]
 
 Planned:
   natrocos storage disk/mount/share mutation commands with --dry-run and --yes
@@ -1209,4 +1853,34 @@ const healthHelp = `Usage:
 Planned:
   natrocos health ports
   natrocos health logs
+`
+
+const serviceHelp = `Usage:
+  natrocos service list [--json]
+  natrocos service status <gateway|app-management|user|storage> [--json]
+
+Planned:
+  natrocos service restart/enable/disable
+`
+
+const authHelp = `Usage:
+  natrocos auth login --username <name> --password-stdin [--json]
+  natrocos auth whoami [--json]
+  natrocos auth logout [--json]
+
+Notes:
+  login stores a local CLI session token beside the CLI config path.
+  --token or NATROCOS_TOKEN can override the stored session for automation.
+`
+
+const userHelp = `Usage:
+  natrocos user list [--json]
+  natrocos user show <username|user-id> [--json]
+  natrocos user add --username <name> [--display-name <name>] --password-stdin [--json]
+
+Notes:
+  user add does not accept a role; the backend assigns user after the first owner.
+
+Planned:
+  natrocos user update/password/sessions/revoke-session/disable/enable
 `

@@ -36,6 +36,7 @@
   "navigation": {
     "dashboard": "Dashboard",
     "apps": "Apps",
+    "storage": "Storage",
     "store": "App Store",
     "settings": "Settings"
   },
@@ -70,7 +71,7 @@
     "storageUsed": "Used",
     "liveApps": "Live apps",
     "liveAppsOnNode": "live apps",
-    "eventStream": "Event stream",
+    "eventStream": "Service health",
     "runtimeFocus": "Runtime focus",
     "authReady": "Auth backend active",
     "authDetail": "gateway-issued session token",
@@ -229,11 +230,45 @@
       }
     }
   },
+  "storage": {
+    "eyebrow": "Local storage",
+    "copy": "Disks, mounts, and pools are read from the storage service through the gateway without changing the filesystem.",
+    "refresh": "Refresh storage",
+    "disks": "Detected disks",
+    "mounted": "Mounted disks",
+    "diskInventory": "Disk inventory",
+    "mounts": "Active mounts",
+    "emptyDisks": "No disks were returned by the storage service.",
+    "emptyMounts": "No mounts were returned by the storage service.",
+    "mountpoints": "Mountpoints",
+    "model": "Model / label",
+    "options": "Options",
+    "mountId": "Mount ID",
+    "toasts": {
+      "refreshed": {
+        "title": "Storage refreshed",
+        "detail": "Disks, mounts, and pools were reloaded from the gateway."
+      }
+    },
+    "errors": {
+      "refreshFailed": "Storage refresh failed."
+    }
+  },
   "settings": {
     "profileEyebrow": "Local profile",
     "profileCopy": "Local account, localization, and shell preferences from the backend session.",
     "security": "Security",
     "passwordHash": "PBKDF2-SHA256",
+    "services": {
+      "title": "Internal services",
+      "copy": "Gateway probes loopback health endpoints for app-management, user, and storage.",
+      "empty": "No service statuses were returned by the gateway.",
+      "status": {
+        "ok": "ok",
+        "unavailable": "unavailable",
+        "misconfigured": "misconfigured"
+      }
+    },
     "users": {
       "title": "Local users",
       "copy": "Owners can read and create local users from the gateway. Roles are assigned by the backend.",

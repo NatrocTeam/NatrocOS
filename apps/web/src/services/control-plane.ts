@@ -7,7 +7,10 @@ import type {
   CurrentUserDto,
   LoginRequestDto,
   RefreshSessionResponseDto,
+  ServiceStatusDto,
   SetupStatusDto,
+  StorageDiskDto,
+  StorageMountDto,
   StoreApp,
   StoreAppId,
   StoreInstallDeployRequestDto,
@@ -32,6 +35,9 @@ export type ControlPlaneClient = {
   currentUser(): Promise<CurrentUserDto>;
   getSetupStatus(): Promise<SetupStatusDto>;
   getSystemSummary(): Promise<SystemSummaryDto>;
+  listServices(): Promise<ServiceStatusDto[]>;
+  listStorageDisks(): Promise<StorageDiskDto[]>;
+  listStorageMounts(): Promise<StorageMountDto[]>;
   listStoreQueue(): Promise<StoreInstallJobDto[]>;
   listUsers(): Promise<UserAccountDto[]>;
   listStoreApps(): Promise<StoreApp[]>;

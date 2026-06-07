@@ -4,17 +4,20 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 
-	"natrocos/internal/servicekit"
+	"natrocos/services/storage/internal/server"
 )
 
 func main() {
-	err := servicekit.ListenAndServe(servicekit.Config{
-		ServiceName: "natrocos-storage",
-		EnvAddr:     "NATROCOS_STORAGE_ADDR",
-		DefaultAddr: "127.0.0.1:8083",
-	})
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+	addr := os.Getenv("NATROCOS_STORAGE_ADDR")
+	if addr == "" {
+		addr = server.DefaultAddr()
+	}
+
+	if err := server.ListenAndServe(addr, server.Options{
+		DataRoot: os.Getenv("NATROCOS_DATA_ROOT"),
+	}); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
 }

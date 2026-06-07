@@ -15,6 +15,7 @@ import type { AppStatus, NavItem, QuickAction } from "@/types/natrocos";
 export const navItems: NavItem[] = [
   { view: "dashboard", icon: Activity },
   { view: "apps", icon: Package },
+  { view: "storage", icon: HardDrive },
   { view: "store", icon: ShoppingBag },
   { view: "settings", icon: Settings },
 ];

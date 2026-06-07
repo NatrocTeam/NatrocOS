@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { motion } from "motion/react";
 import {
+  CircleCheck,
   Cloud,
   Languages,
   Moon,
@@ -8,6 +9,7 @@ import {
   Server,
   ShieldCheck,
   Sun,
+  TriangleAlert,
   UserPlus,
   Users,
   type LucideIcon,
@@ -24,6 +26,7 @@ import { dictionary } from "@/i18n/dictionary";
 import type {
   CreateUserRequestDto,
   Language,
+  ServiceStatusDto,
   Theme,
   UserAccountDto,
   UserSessionDto,
@@ -34,6 +37,7 @@ export function SettingsView({
   isUsersRefreshing,
   language,
   nodeName,
+  serviceStatuses,
   session,
   setLanguage,
   theme,
@@ -46,6 +50,7 @@ export function SettingsView({
   isUsersRefreshing: boolean;
   language: Language;
   nodeName: string;
+  serviceStatuses: ServiceStatusDto[];
   session: UserSessionDto | null;
   setLanguage: (language: Language) => void;
   theme: Theme;
@@ -133,6 +138,7 @@ export function SettingsView({
           </div>
         </Surface>
       </div>
+      <ServiceHealthPanel language={language} services={serviceStatuses} />
       {session?.role === "owner" && (
         <UserManagementPanel
           isCreatingUser={isCreatingUser}
@@ -144,6 +150,80 @@ export function SettingsView({
         />
       )}
     </div>
+  );
+}
+
+function ServiceHealthPanel({
+  language,
+  services,
+}: {
+  language: Language;
+  services: ServiceStatusDto[];
+}) {
+  const t = dictionary[language];
+  const statusLabels: Record<string, string> = t.settings.services.status;
+
+  return (
+    <Surface>
+      <div className="rounded-[7px] bg-[#fbfcf8] p-5 dark:bg-[#1b1f18] sm:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold tracking-tight">
+              {t.settings.services.title}
+            </p>
+            <p className="mt-1 max-w-[64ch] text-sm leading-relaxed text-[#62685e] dark:text-[#aeb5a6]">
+              {t.settings.services.copy}
+            </p>
+          </div>
+          <Server className="shrink-0" size={18} strokeWidth={1.5} />
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {services.length === 0 ? (
+            <div className="rounded-lg bg-[#eef0e9] p-4 text-sm text-[#62685e] ring-1 ring-[#20241f]/6 dark:bg-white/5 dark:text-[#aeb5a6] dark:ring-white/10">
+              {t.settings.services.empty}
+            </div>
+          ) : (
+            services.map((service) => {
+              const isOk = service.status === "ok";
+              const Icon = isOk ? CircleCheck : TriangleAlert;
+
+              return (
+                <div
+                  key={service.name}
+                  className="min-w-0 rounded-lg bg-[#eef0e9] p-4 ring-1 ring-[#20241f]/6 dark:bg-white/5 dark:ring-white/10"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="truncate text-sm font-semibold tracking-tight">
+                      {service.name}
+                    </p>
+                    <Icon
+                      className={
+                        isOk
+                          ? "text-[#2f7d59]"
+                          : "text-[#a4643b] dark:text-[#e6a069]"
+                      }
+                      size={18}
+                      strokeWidth={1.5}
+                    />
+                  </div>
+                  <p
+                    className={`mt-5 inline-flex rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${serviceStatusTone(service.status)}`}
+                  >
+                    {statusLabels[service.status] ?? service.status}
+                  </p>
+                  {service.detail && (
+                    <p className="mt-3 truncate font-mono text-xs text-[#6d7368] dark:text-[#aeb5a6]">
+                      {service.detail}
+                    </p>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </Surface>
   );
 }
 
@@ -295,6 +375,16 @@ function UserManagementPanel({
       </div>
     </Surface>
   );
+}
+
+function serviceStatusTone(status: string) {
+  if (status === "ok") {
+    return "bg-[#2f7d59]/10 text-[#2f7d59] ring-[#2f7d59]/20";
+  }
+  if (status === "misconfigured") {
+    return "bg-[#b88936]/12 text-[#8a6428] ring-[#b88936]/25 dark:text-[#e7c071]";
+  }
+  return "bg-[#a9544f]/10 text-[#873f3a] ring-[#a9544f]/20 dark:text-[#f2b6b0]";
 }
 
 function Preference({

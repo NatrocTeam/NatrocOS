@@ -9,6 +9,7 @@ const (
 
 const (
 	RouteHealth                    = "/health"
+	RouteServices                  = "/api/services"
 	RouteSystem                    = "/api/system/summary"
 	RouteApps                      = "/api/apps"
 	RouteAppAction                 = "POST /api/apps/{id}/{action}"
@@ -21,6 +22,8 @@ const (
 	RouteAuthLogout                = "POST /api/auth/logout"
 	RouteUsers                     = "/api/users"
 	RouteCurrentUser               = "/api/users/me"
+	RouteStorageDisks              = "/api/storage/disks"
+	RouteStorageMounts             = "/api/storage/mounts"
 	RouteStoragePools              = "/api/storage/pools"
 	RouteAppManagementInstallQueue = "/api/app-management/install-queue"
 	RouteAppManagementProcessQueue = "POST /api/app-management/install-queue/process"
@@ -63,6 +66,31 @@ type StoragePool struct {
 	MountPath string `json:"mountPath"`
 	Used      string `json:"used"`
 	Total     string `json:"total"`
+}
+
+type StorageDisk struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Path        string   `json:"path"`
+	Parent      string   `json:"parent,omitempty"`
+	Type        string   `json:"type"`
+	Size        uint64   `json:"size"`
+	Filesystem  string   `json:"filesystem,omitempty"`
+	Label       string   `json:"label,omitempty"`
+	Model       string   `json:"model,omitempty"`
+	Serial      string   `json:"serial,omitempty"`
+	Mountpoints []string `json:"mountpoints"`
+	Removable   bool     `json:"removable"`
+}
+
+type StorageMount struct {
+	ID         string   `json:"id"`
+	Source     string   `json:"source"`
+	Target     string   `json:"target"`
+	Filesystem string   `json:"filesystem"`
+	Options    []string `json:"options"`
+	Used       string   `json:"used,omitempty"`
+	Total      string   `json:"total,omitempty"`
 }
 
 type SystemSummary struct {
